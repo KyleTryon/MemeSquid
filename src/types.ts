@@ -18,16 +18,31 @@ export interface TextElement {
   shadowOffsetX?: number;
   shadowOffsetY?: number;
   shadowOpacity?: number;
+  zIndex?: number;
 }
 
 export interface ImageElement {
   id: string;
   type: 'image';
-  image: HTMLImageElement;
+  image: HTMLImageElement | HTMLCanvasElement;
   x: number;
   y: number;
   width: number;
   height: number;
+}
+
+export interface OverlayImageElement {
+  id: string;
+  type: 'overlayImage';
+  image: HTMLImageElement | HTMLCanvasElement;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation?: number;
+  scaleX?: number;
+  scaleY?: number;
+  zIndex?: number;
 }
 
 export interface LineElement {

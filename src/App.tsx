@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Text, Transformer, Line as KonvaLine } from 'react-konva';
 import { Upload, Link as LinkIcon, Type, Download, Trash2, ClipboardPaste, Settings2, AlignLeft, Palette, Box, ChevronDown, Undo2, Redo2, AlignCenter, AlignRight, MoveHorizontal, MoveVertical, PenTool, MousePointer2, HelpCircle, X } from 'lucide-react';
-import { TextElement, ImageElement, LineElement } from './types';
+import { TextElement, ImageElement, LineElement, OverlayImageElement } from './types';
+import { Canvg } from 'canvg';
 
 const round2 = (num: number) => Math.round(num * 100) / 100;
 
 const App = () => {
   const [mainImage, setMainImage] = useState<ImageElement | null>(null);
+  const [images, setImages] = useState<OverlayImageElement[]>([]);
   const [texts, setTexts] = useState<TextElement[]>([]);
   const [lines, setLines] = useState<LineElement[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -19,44 +21,89 @@ const App = () => {
   const [isMobilePropsOpen, setIsMobilePropsOpen] = useState(false);
 
   // --- History State ---
-  const [past, setPast] = useState<{texts: TextElement[], mainImage: ImageElement | null, lines: LineElement[]}[]>([]);
-  const [future, setFuture] = useState<{texts: TextElement[], mainImage: ImageElement | null, lines: LineElement[]}[]>([]);
+  const [past, setPast] = useState<{texts: TextElement[], mainImage: ImageElement | null, lines: LineElement[], images: OverlayImageElement[]}[]>([]);
+  const [future, setFuture] = useState<{texts: TextElement[], mainImage: ImageElement | null, lines: LineElement[], images: OverlayImageElement[]}[]>([]);
   const isHistoryAction = useRef(false);
-  const lastSaved = useRef({ texts, mainImage, lines });
+  const lastSaved = useRef({ texts, mainImage, lines, images });
 
   const stageRef = useRef<any>(null);
 
   // --- Image Handling Logic ---
 
-  const handleImageLoad = useCallback((src: string) => {
-    const img = new window.Image();
-    img.src = src;
-    img.crossOrigin = "Anonymous";
-    img.onload = () => {
+  const handleImageLoad = useCallback(async (src: string, isSvg: boolean = false) => {
+    let finalImage: HTMLImageElement | HTMLCanvasElement;
+    let imgWidth = 0;
+    let imgHeight = 0;
+
+    if (isSvg) {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const v = await Canvg.from(ctx, src);
+      await v.render();
+      imgWidth = canvas.width || 300;
+      imgHeight = canvas.height || 300;
+      finalImage = canvas;
+    } else {
+      const img = new window.Image();
+      img.src = src;
+      img.crossOrigin = "Anonymous";
+      await new Promise((resolve) => {
+        img.onload = resolve;
+      });
+      imgWidth = img.width;
+      imgHeight = img.height;
+      finalImage = img;
+    }
+
+    if (!mainImage) {
       // Calculate dimensions to fit viewport roughly
       const isMobile = window.innerWidth < 768;
       const maxW = window.innerWidth * (isMobile ? 0.9 : 0.7);
       const maxH = window.innerHeight * (isMobile ? 0.6 : 0.8);
-      const ratio = Math.min(maxW / img.width, maxH / img.height);
+      const ratio = Math.min(maxW / imgWidth, maxH / imgHeight);
       
       setMainImage({
         id: 'bg-image',
         type: 'image',
-        image: img,
+        image: finalImage,
         x: 0,
         y: 0,
-        width: img.width * ratio,
-        height: img.height * ratio
+        width: imgWidth * ratio,
+        height: imgHeight * ratio
       });
-    };
-  }, []);
+    } else {
+      const newId = `image-${Date.now()}`;
+      const ratio = Math.min(1, 300 / imgWidth);
+      setImages(prev => [...prev, {
+        id: newId,
+        type: 'overlayImage',
+        image: finalImage,
+        x: 50,
+        y: 50,
+        width: imgWidth * ratio,
+        height: imgHeight * ratio,
+        rotation: 0,
+        scaleX: 1,
+        scaleY: 1,
+        zIndex: Date.now()
+      }]);
+      setSelectedId(newId);
+      setTool('select');
+    }
+  }, [mainImage]);
 
   const onFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      const isSvg = file.type === 'image/svg+xml';
       const reader = new FileReader();
-      reader.onload = (f) => handleImageLoad(f.target?.result as string);
-      reader.readAsDataURL(file);
+      reader.onload = (f) => handleImageLoad(f.target?.result as string, isSvg);
+      if (isSvg) {
+        reader.readAsText(file);
+      } else {
+        reader.readAsDataURL(file);
+      }
     }
   }, [handleImageLoad]);
 
@@ -67,25 +114,35 @@ const App = () => {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
-    const validTypes = ['image/png', 'image/jpeg', 'image/webp'];
+    const validTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
     if (file && validTypes.includes(file.type)) {
+      const isSvg = file.type === 'image/svg+xml';
       const reader = new FileReader();
-      reader.onload = (f) => handleImageLoad(f.target?.result as string);
-      reader.readAsDataURL(file);
+      reader.onload = (f) => handleImageLoad(f.target?.result as string, isSvg);
+      if (isSvg) {
+        reader.readAsText(file);
+      } else {
+        reader.readAsDataURL(file);
+      }
     }
   }, [handleImageLoad]);
 
   const handlePaste = useCallback((e: ClipboardEvent) => {
     const items = e.clipboardData?.items;
-    const validTypes = ['image/png', 'image/jpeg', 'image/webp'];
+    const validTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
     if (items) {
       for (let i = 0; i < items.length; i++) {
         if (validTypes.includes(items[i].type)) {
           const blob = items[i].getAsFile();
           if (blob) {
+            const isSvg = items[i].type === 'image/svg+xml';
             const reader = new FileReader();
-            reader.onload = (f) => handleImageLoad(f.target?.result as string);
-            reader.readAsDataURL(blob);
+            reader.onload = (f) => handleImageLoad(f.target?.result as string, isSvg);
+            if (isSvg) {
+              reader.readAsText(blob);
+            } else {
+              reader.readAsDataURL(blob);
+            }
           }
         }
       }
@@ -101,7 +158,7 @@ const App = () => {
   useEffect(() => {
     if (isHistoryAction.current) {
       isHistoryAction.current = false;
-      lastSaved.current = { texts, mainImage, lines };
+      lastSaved.current = { texts, mainImage, lines, images };
       return;
     }
 
@@ -109,16 +166,17 @@ const App = () => {
       const textsChanged = JSON.stringify(lastSaved.current.texts) !== JSON.stringify(texts);
       const imageChanged = lastSaved.current.mainImage?.id !== mainImage?.id;
       const linesChanged = JSON.stringify(lastSaved.current.lines) !== JSON.stringify(lines);
+      const imagesChanged = JSON.stringify(lastSaved.current.images.map(i => ({...i, image: null}))) !== JSON.stringify(images.map(i => ({...i, image: null})));
       
-      if (textsChanged || imageChanged || linesChanged) {
+      if (textsChanged || imageChanged || linesChanged || imagesChanged) {
         setPast(p => [...p, lastSaved.current].slice(-50));
         setFuture([]);
-        lastSaved.current = { texts, mainImage, lines };
+        lastSaved.current = { texts, mainImage, lines, images };
       }
     }, 400);
 
     return () => clearTimeout(timeout);
-  }, [texts, mainImage, lines]);
+  }, [texts, mainImage, lines, images]);
 
   const undo = useCallback(() => {
     setPast(p => {
@@ -126,15 +184,16 @@ const App = () => {
       const previous = p[p.length - 1];
       const newPast = p.slice(0, -1);
       
-      setFuture(f => [{ texts, mainImage, lines }, ...f]);
+      setFuture(f => [{ texts, mainImage, lines, images }, ...f]);
       isHistoryAction.current = true;
       setTexts(previous.texts);
       setMainImage(previous.mainImage);
       setLines(previous.lines);
+      setImages(previous.images);
       
       return newPast;
     });
-  }, [texts, mainImage, lines]);
+  }, [texts, mainImage, lines, images]);
 
   const redo = useCallback(() => {
     setFuture(f => {
@@ -142,19 +201,21 @@ const App = () => {
       const next = f[0];
       const newFuture = f.slice(1);
       
-      setPast(p => [...p, { texts, mainImage, lines }]);
+      setPast(p => [...p, { texts, mainImage, lines, images }]);
       isHistoryAction.current = true;
       setTexts(next.texts);
       setMainImage(next.mainImage);
       setLines(next.lines);
+      setImages(next.images);
       
       return newFuture;
     });
-  }, [texts, mainImage, lines]);
+  }, [texts, mainImage, lines, images]);
 
   const deleteSelected = useCallback(() => {
     if (selectedId) {
       setTexts(prev => prev.filter(t => t.id !== selectedId));
+      setImages(prev => prev.filter(i => i.id !== selectedId));
       setSelectedId(null);
     }
   }, [selectedId]);
@@ -207,6 +268,7 @@ const App = () => {
       shadowOffsetX: 0,
       shadowOffsetY: 0,
       shadowOpacity: 1,
+      zIndex: Date.now(),
     };
     setTexts(prev => [...prev, newText]);
     setSelectedId(newText.id);
@@ -216,11 +278,16 @@ const App = () => {
     setTexts(prev => prev.map(t => t.id === id ? { ...t, ...attrs } : t));
   }, []);
 
-  const alignTextToCanvas = useCallback((pos: string) => {
+  const updateImage = useCallback((id: string, attrs: Partial<OverlayImageElement>) => {
+    setImages(prev => prev.map(i => i.id === id ? { ...i, ...attrs } : i));
+  }, []);
+
+  const alignElementToCanvas = useCallback((pos: string) => {
     if (!mainImage || !selectedId || !stageRef.current) return;
     const node = stageRef.current.findOne(`#${selectedId}`);
     if (node) {
-      const updates: Partial<TextElement> = {};
+      const isText = selectedId.startsWith('text-');
+      const updates: any = {};
       const padding = 20;
       const nodeW = node.width() * node.scaleX();
       const nodeH = node.height() * node.scaleY();
@@ -230,13 +297,13 @@ const App = () => {
       // X alignment
       if (pos.endsWith('l')) {
         updates.x = padding;
-        updates.align = 'left';
+        if (isText) updates.align = 'left';
       } else if (pos.endsWith('c')) {
         updates.x = round2((canvasW - nodeW) / 2);
-        updates.align = 'center';
+        if (isText) updates.align = 'center';
       } else if (pos.endsWith('r')) {
         updates.x = round2(canvasW - nodeW - padding);
-        updates.align = 'right';
+        if (isText) updates.align = 'right';
       }
 
       // Y alignment
@@ -248,9 +315,13 @@ const App = () => {
         updates.y = round2(canvasH - nodeH - padding);
       }
 
-      updateText(selectedId, updates);
+      if (isText) {
+        updateText(selectedId, updates);
+      } else {
+        updateImage(selectedId, updates);
+      }
     }
-  }, [mainImage, selectedId, updateText]);
+  }, [mainImage, selectedId, updateText, updateImage]);
 
   const handleRotationChange = useCallback((newRotation: number) => {
     if (!stageRef.current || !selectedId) return;
@@ -270,17 +341,40 @@ const App = () => {
       const dx = center.x - newCenter.x;
       const dy = center.y - newCenter.y;
       
-      updateText(selectedId, {
+      const updates = {
         rotation: newRotation,
         x: round2(node.x() + dx),
         y: round2(node.y() + dy)
-      });
+      };
+
+      if (selectedId.startsWith('text-')) {
+        updateText(selectedId, updates);
+      } else {
+        updateImage(selectedId, updates);
+      }
     }
-  }, [selectedId, updateText]);
+  }, [selectedId, updateText, updateImage]);
 
   const handleMouseDown = (e: any) => {
     if (tool === 'select') {
-      if (e.target === e.target.getStage()) setSelectedId(null);
+      const clickedOnEmpty = e.target === e.target.getStage();
+      const clickedOnBackground = e.target.attrs.id === 'background-image';
+      const isSelectable = e.target.attrs.id && (e.target.attrs.id.startsWith('text-') || e.target.attrs.id.startsWith('image-'));
+      const isTransformer = e.target.getParent && e.target.getParent()?.className === 'Transformer';
+      
+      if (clickedOnEmpty || clickedOnBackground || (!isSelectable && !isTransformer)) {
+        setSelectedId(null);
+      } else if (isSelectable) {
+        const id = e.target.attrs.id;
+        setSelectedId(id);
+        
+        // Bring to front
+        if (id.startsWith('text-')) {
+          setTexts(prev => prev.map(t => t.id === id ? { ...t, zIndex: Date.now() } : t));
+        } else if (id.startsWith('image-')) {
+          setImages(prev => prev.map(i => i.id === id ? { ...i, zIndex: Date.now() } : i));
+        }
+      }
       return;
     }
     
@@ -329,7 +423,7 @@ const App = () => {
       // Force history save immediately on mouse up for drawing
       setPast(p => [...p, lastSaved.current].slice(-50));
       setFuture([]);
-      lastSaved.current = { texts, mainImage, lines };
+      lastSaved.current = { texts, mainImage, lines, images };
     }
   };
 
@@ -349,6 +443,12 @@ const App = () => {
   }, []);
 
   const selectedText = texts.find(t => t.id === selectedId);
+  const selectedImage = images.find(i => i.id === selectedId);
+
+  const allElements = [
+    ...images.map(i => ({ ...i, _itemType: 'image' as const })),
+    ...texts.map(t => ({ ...t, _itemType: 'text' as const }))
+  ].sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0));
 
   return (
     <div className="flex flex-col h-screen bg-neutral-900 text-neutral-100 font-sans">
@@ -475,10 +575,40 @@ const App = () => {
               >
                 <Layer>
                   <KonvaImage 
+                    id="background-image"
                     image={mainImage.image} 
                     width={mainImage.width} 
                     height={mainImage.height} 
                   />
+                  {allElements.map((el) => {
+                    if (el._itemType === 'image') {
+                      return (
+                        <OverlayImageElementItem
+                          key={el.id}
+                          data={el}
+                          isSelected={el.id === selectedId && tool === 'select'}
+                          onSelect={(id: string) => {
+                            if (tool === 'select') setSelectedId(id);
+                          }}
+                          onChange={updateImage}
+                          tool={tool}
+                        />
+                      );
+                    } else {
+                      return (
+                        <TextElementItem 
+                          key={el.id} 
+                          data={el} 
+                          isSelected={el.id === selectedId && tool === 'select'}
+                          onSelect={(id: string) => {
+                            if (tool === 'select') setSelectedId(id);
+                          }}
+                          onChange={updateText}
+                          tool={tool}
+                        />
+                      );
+                    }
+                  })}
                   {lines.map((line) => (
                     <KonvaLine
                       key={line.id}
@@ -489,17 +619,7 @@ const App = () => {
                       lineCap="round"
                       lineJoin="round"
                       globalCompositeOperation="source-over"
-                    />
-                  ))}
-                  {texts.map((t) => (
-                    <TextElementItem 
-                      key={t.id} 
-                      data={t} 
-                      isSelected={t.id === selectedId && tool === 'select'}
-                      onSelect={(id: string) => {
-                        if (tool === 'select') setSelectedId(id);
-                      }}
-                      onChange={updateText}
+                      listening={false}
                     />
                   ))}
                 </Layer>
@@ -783,23 +903,23 @@ const App = () => {
                       <label className="text-[10px] font-medium text-neutral-500 uppercase">Align to Canvas</label>
                       <div className="relative w-16 h-16 border-2 border-neutral-700 mx-auto mt-4 mb-2">
                         {/* Top Left */}
-                        <button onClick={() => alignTextToCanvas('tl')} className="absolute -top-2 -left-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Top Left" />
+                        <button onClick={() => alignElementToCanvas('tl')} className="absolute -top-2 -left-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Top Left" />
                         {/* Top Center */}
-                        <button onClick={() => alignTextToCanvas('tc')} className="absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Top Center" />
+                        <button onClick={() => alignElementToCanvas('tc')} className="absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Top Center" />
                         {/* Top Right */}
-                        <button onClick={() => alignTextToCanvas('tr')} className="absolute -top-2 -right-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Top Right" />
+                        <button onClick={() => alignElementToCanvas('tr')} className="absolute -top-2 -right-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Top Right" />
                         {/* Mid Left */}
-                        <button onClick={() => alignTextToCanvas('ml')} className="absolute top-1/2 -translate-y-1/2 -left-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Middle Left" />
+                        <button onClick={() => alignElementToCanvas('ml')} className="absolute top-1/2 -translate-y-1/2 -left-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Middle Left" />
                         {/* Mid Center */}
-                        <button onClick={() => alignTextToCanvas('mc')} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Center" />
+                        <button onClick={() => alignElementToCanvas('mc')} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Center" />
                         {/* Mid Right */}
-                        <button onClick={() => alignTextToCanvas('mr')} className="absolute top-1/2 -translate-y-1/2 -right-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Middle Right" />
+                        <button onClick={() => alignElementToCanvas('mr')} className="absolute top-1/2 -translate-y-1/2 -right-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Middle Right" />
                         {/* Bottom Left */}
-                        <button onClick={() => alignTextToCanvas('bl')} className="absolute -bottom-2 -left-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Bottom Left" />
+                        <button onClick={() => alignElementToCanvas('bl')} className="absolute -bottom-2 -left-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Bottom Left" />
                         {/* Bottom Center */}
-                        <button onClick={() => alignTextToCanvas('bc')} className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Bottom Center" />
+                        <button onClick={() => alignElementToCanvas('bc')} className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Bottom Center" />
                         {/* Bottom Right */}
-                        <button onClick={() => alignTextToCanvas('br')} className="absolute -bottom-2 -right-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Bottom Right" />
+                        <button onClick={() => alignElementToCanvas('br')} className="absolute -bottom-2 -right-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Bottom Right" />
                       </div>
                     </div>
                     <div className="space-y-1.5 col-span-2">
@@ -811,6 +931,83 @@ const App = () => {
                         type="range" 
                         min="-180" max="180" step="1"
                         value={selectedText.rotation || 0}
+                        onChange={(e) => handleRotationChange(Number(e.target.value))}
+                        className="w-full accent-yellow-400"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-neutral-800/50">
+                  <button 
+                    onClick={deleteSelected}
+                    className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 hover:border-red-500/30 transition-all font-medium text-sm"
+                  >
+                    <Trash2 size={16} /> Delete Element
+                  </button>
+                </div>
+              </div>
+            ) : selectedImage ? (
+              <div className="space-y-8">
+                {/* Layout Section */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 text-neutral-400 mb-2">
+                    <Box size={14} />
+                    <h3 className="text-xs font-semibold uppercase tracking-wider">Layout</h3>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-medium text-neutral-500 uppercase">Position X</label>
+                      <input 
+                        type="number" 
+                        step="1"
+                        value={Math.round(selectedImage.x)}
+                        onChange={(e) => updateImage(selectedImage.id, { x: Number(e.target.value) })}
+                        className="w-full bg-neutral-950/50 rounded-lg border border-neutral-800 p-2 text-sm focus:border-yellow-400 outline-none transition-all"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-medium text-neutral-500 uppercase">Position Y</label>
+                      <input 
+                        type="number" 
+                        step="1"
+                        value={Math.round(selectedImage.y)}
+                        onChange={(e) => updateImage(selectedImage.id, { y: Number(e.target.value) })}
+                        className="w-full bg-neutral-950/50 rounded-lg border border-neutral-800 p-2 text-sm focus:border-yellow-400 outline-none transition-all"
+                      />
+                    </div>
+                    <div className="space-y-1.5 col-span-2">
+                      <label className="text-[10px] font-medium text-neutral-500 uppercase">Align to Canvas</label>
+                      <div className="relative w-16 h-16 border-2 border-neutral-700 mx-auto mt-4 mb-2">
+                        {/* Top Left */}
+                        <button onClick={() => alignElementToCanvas('tl')} className="absolute -top-2 -left-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Top Left" />
+                        {/* Top Center */}
+                        <button onClick={() => alignElementToCanvas('tc')} className="absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Top Center" />
+                        {/* Top Right */}
+                        <button onClick={() => alignElementToCanvas('tr')} className="absolute -top-2 -right-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Top Right" />
+                        {/* Mid Left */}
+                        <button onClick={() => alignElementToCanvas('ml')} className="absolute top-1/2 -translate-y-1/2 -left-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Middle Left" />
+                        {/* Mid Center */}
+                        <button onClick={() => alignElementToCanvas('mc')} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Center" />
+                        {/* Mid Right */}
+                        <button onClick={() => alignElementToCanvas('mr')} className="absolute top-1/2 -translate-y-1/2 -right-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Middle Right" />
+                        {/* Bottom Left */}
+                        <button onClick={() => alignElementToCanvas('bl')} className="absolute -bottom-2 -left-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Bottom Left" />
+                        {/* Bottom Center */}
+                        <button onClick={() => alignElementToCanvas('bc')} className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Bottom Center" />
+                        {/* Bottom Right */}
+                        <button onClick={() => alignElementToCanvas('br')} className="absolute -bottom-2 -right-2 w-4 h-4 bg-neutral-800 border-2 border-neutral-500 hover:border-yellow-400 hover:bg-yellow-400 rounded-full transition-colors" title="Bottom Right" />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5 col-span-2">
+                      <div className="flex justify-between">
+                        <label className="text-[10px] font-medium text-neutral-500 uppercase">Rotation</label>
+                        <span className="text-[10px] text-neutral-400">{round2(selectedImage.rotation || 0)}°</span>
+                      </div>
+                      <input 
+                        type="range" 
+                        min="-180" max="180" step="1"
+                        value={selectedImage.rotation || 0}
                         onChange={(e) => handleRotationChange(Number(e.target.value))}
                         className="w-full accent-yellow-400"
                       />
@@ -880,7 +1077,7 @@ const App = () => {
 
 // --- Sub-component for individual text nodes ---
 
-const TextElementItem = memo(({ data, isSelected, onSelect, onChange }: any) => {
+const TextElementItem = memo(({ data, isSelected, onSelect, onChange, tool }: any) => {
   const shapeRef = useRef<any>(null);
   const trRef = useRef<any>(null);
   const dragStartPos = useRef<{ x: number, y: number } | null>(null);
@@ -925,7 +1122,8 @@ const TextElementItem = memo(({ data, isSelected, onSelect, onChange }: any) => 
       <Text
         ref={shapeRef}
         {...data}
-        draggable
+        draggable={tool === 'select'}
+        listening={tool === 'select'}
         onClick={() => onSelect(data.id)}
         onTap={() => onSelect(data.id)}
         onDragStart={handleDragStart}
@@ -957,6 +1155,88 @@ const TextElementItem = memo(({ data, isSelected, onSelect, onChange }: any) => 
           ref={trRef}
           boundBoxFunc={(oldBox, newBox) => {
             newBox.width = Math.max(30, newBox.width);
+            return newBox;
+          }}
+        />
+      )}
+    </React.Fragment>
+  );
+});
+
+const OverlayImageElementItem = memo(({ data, isSelected, onSelect, onChange, tool }: any) => {
+  const shapeRef = useRef<any>(null);
+  const trRef = useRef<any>(null);
+  const dragStartPos = useRef<{ x: number, y: number } | null>(null);
+  const lockedAxis = useRef<'x' | 'y' | null>(null);
+
+  useEffect(() => {
+    if (isSelected) {
+      trRef.current.nodes([shapeRef.current]);
+      trRef.current.getLayer().batchDraw();
+    }
+  }, [isSelected]);
+
+  const handleDragStart = (e: any) => {
+    dragStartPos.current = { x: e.target.x(), y: e.target.y() };
+    lockedAxis.current = null;
+  };
+
+  const handleDragMove = (e: any) => {
+    if (e.evt.shiftKey && dragStartPos.current) {
+      if (!lockedAxis.current) {
+        const dx = Math.abs(e.target.x() - dragStartPos.current.x);
+        const dy = Math.abs(e.target.y() - dragStartPos.current.y);
+        if (dx > dy) {
+          lockedAxis.current = 'x';
+        } else if (dy > dx) {
+          lockedAxis.current = 'y';
+        }
+      }
+
+      if (lockedAxis.current === 'x') {
+        e.target.y(dragStartPos.current.y);
+      } else if (lockedAxis.current === 'y') {
+        e.target.x(dragStartPos.current.x);
+      }
+    } else {
+      lockedAxis.current = null;
+    }
+  };
+
+  return (
+    <React.Fragment>
+      <KonvaImage
+        ref={shapeRef}
+        {...data}
+        draggable={tool === 'select'}
+        listening={tool === 'select'}
+        onClick={() => onSelect(data.id)}
+        onTap={() => onSelect(data.id)}
+        onDragStart={handleDragStart}
+        onDragMove={handleDragMove}
+        onDragEnd={(e) => {
+          onChange(data.id, {
+            x: round2(e.target.x()),
+            y: round2(e.target.y()),
+          });
+        }}
+        onTransformEnd={() => {
+          const node = shapeRef.current;
+          onChange(data.id, {
+            x: round2(node.x()),
+            y: round2(node.y()),
+            scaleX: round2(node.scaleX()),
+            scaleY: round2(node.scaleY()),
+            rotation: round2(node.rotation()),
+          });
+        }}
+      />
+      {isSelected && (
+        <Transformer
+          ref={trRef}
+          boundBoxFunc={(oldBox, newBox) => {
+            newBox.width = Math.max(5, newBox.width);
+            newBox.height = Math.max(5, newBox.height);
             return newBox;
           }}
         />
