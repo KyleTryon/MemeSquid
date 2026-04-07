@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Text, Transformer, Line as KonvaLine } from 'react-konva';
-import { Upload, Link as LinkIcon, Type, Download, Trash2, ClipboardPaste, Settings2, AlignLeft, Palette, Box, ChevronDown, Undo2, Redo2, AlignCenter, AlignRight, MoveHorizontal, MoveVertical, PenTool, MousePointer2, HelpCircle, X } from 'lucide-react';
+import { Upload, Link as LinkIcon, Type, Download, Trash2, ClipboardPaste, Settings2, AlignLeft, Palette, Box, ChevronDown, Undo2, Redo2, AlignCenter, AlignRight, MoveHorizontal, MoveVertical, PenTool, MousePointer2, HelpCircle, X, Copy, Image as ImageIcon } from 'lucide-react';
 import { TextElement, ImageElement, LineElement, OverlayImageElement } from './types';
 import { Canvg } from 'canvg';
 
@@ -19,6 +19,7 @@ const App = () => {
   const isDrawing = useRef(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isMobilePropsOpen, setIsMobilePropsOpen] = useState(false);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
   // --- History State ---
   const [past, setPast] = useState<{texts: TextElement[], mainImage: ImageElement | null, lines: LineElement[], images: OverlayImageElement[]}[]>([]);
@@ -427,17 +428,33 @@ const App = () => {
     }
   };
 
-  const downloadMeme = useCallback(() => {
+  const exportMeme = useCallback((format: 'png' | 'jpeg' | 'webp' | 'clipboard') => {
     setSelectedId(null);
-    setTimeout(() => {
+    setIsExportMenuOpen(false);
+    setTimeout(async () => {
       if (stageRef.current) {
-        const uri = stageRef.current.toDataURL();
-        const link = document.createElement('a');
-        link.download = 'meme.png';
-        link.href = uri;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        if (format === 'clipboard') {
+          try {
+            const uri = stageRef.current.toDataURL({ mimeType: 'image/png', pixelRatio: 2 });
+            const res = await fetch(uri);
+            const blob = await res.blob();
+            await navigator.clipboard.write([
+              new ClipboardItem({ 'image/png': blob })
+            ]);
+            // Optional: show a toast or alert
+          } catch (err) {
+            console.error('Failed to copy', err);
+          }
+        } else {
+          const mimeType = `image/${format}`;
+          const uri = stageRef.current.toDataURL({ mimeType, pixelRatio: 2 });
+          const link = document.createElement('a');
+          link.download = `meme.${format}`;
+          link.href = uri;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
       }
     }, 100);
   }, []);
@@ -453,13 +470,13 @@ const App = () => {
   return (
     <div className="flex flex-col h-screen bg-neutral-900 text-neutral-100 font-sans">
       {/* Header */}
-      <header className="border-b border-neutral-800 p-3 md:p-4 flex items-center justify-between bg-neutral-900/50 backdrop-blur-md z-20 relative">
+      <header className="border-b border-neutral-800 p-3 md:p-4 flex items-center justify-between bg-neutral-900/50 backdrop-blur-md z-40 relative">
         <h1 className="text-lg md:text-xl font-black tracking-tighter flex items-center gap-2">
           <span className="bg-yellow-400 text-black px-2 py-0.5 rounded">MEME</span> GEN
         </h1>
         
         <div className="flex items-center gap-2 md:gap-4">
-          <div className="flex items-center gap-1 mr-1 md:mr-2 border-r border-neutral-800 pr-2 md:pr-6">
+          <div className="flex items-center gap-1 md:gap-2 border-r border-neutral-800 pr-2 md:pr-6">
             <button 
               onClick={undo} 
               disabled={past.length === 0}
@@ -477,12 +494,58 @@ const App = () => {
               <Redo2 size={18} className="w-4 h-4 md:w-[18px] md:h-[18px]" />
             </button>
           </div>
-          <button 
-            onClick={downloadMeme}
-            className="flex items-center gap-1 md:gap-2 bg-yellow-400 text-black font-bold px-3 md:px-4 py-1.5 rounded-lg hover:bg-yellow-300 transition-colors text-xs md:text-sm"
-          >
-            <Download size={16} className="w-3.5 h-3.5 md:w-4 md:h-4" /> <span className="hidden sm:inline">Export</span>
-          </button>
+          <div className="relative">
+            <div className="flex items-stretch h-8 md:h-9">
+              <button 
+                onClick={() => exportMeme('png')}
+                className="flex items-center gap-1 md:gap-2 bg-yellow-400 text-black font-bold px-3 md:px-4 rounded-l-lg hover:bg-yellow-300 transition-colors text-xs md:text-sm border-r border-yellow-500"
+              >
+                <Download size={16} className="w-3.5 h-3.5 md:w-4 md:h-4" /> <span className="hidden sm:inline">Export</span>
+              </button>
+              <button
+                onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                className="bg-yellow-400 text-black px-1.5 rounded-r-lg hover:bg-yellow-300 transition-colors flex items-center justify-center"
+              >
+                <ChevronDown size={16} className="w-4 h-4" />
+              </button>
+            </div>
+            
+            {isExportMenuOpen && (
+              <>
+                <div 
+                  className="fixed inset-0 z-40" 
+                  onClick={() => setIsExportMenuOpen(false)}
+                />
+                <div className="absolute right-0 top-full mt-2 w-48 bg-neutral-800 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 py-1">
+                  <button 
+                    onClick={() => exportMeme('clipboard')}
+                    className="w-full text-left px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-700 hover:text-white flex items-center gap-2"
+                  >
+                    <Copy size={14} /> Copy to Clipboard
+                  </button>
+                  <div className="h-px bg-neutral-700 my-1" />
+                  <button 
+                    onClick={() => exportMeme('png')}
+                    className="w-full text-left px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-700 hover:text-white flex items-center gap-2"
+                  >
+                    <ImageIcon size={14} /> Download as PNG
+                  </button>
+                  <button 
+                    onClick={() => exportMeme('jpeg')}
+                    className="w-full text-left px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-700 hover:text-white flex items-center gap-2"
+                  >
+                    <ImageIcon size={14} /> Download as JPG
+                  </button>
+                  <button 
+                    onClick={() => exportMeme('webp')}
+                    className="w-full text-left px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-700 hover:text-white flex items-center gap-2"
+                  >
+                    <ImageIcon size={14} /> Download as WEBP
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
