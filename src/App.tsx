@@ -16,6 +16,7 @@ const App = () => {
   const [drawWidth, setDrawWidth] = useState(5);
   const isDrawing = useRef(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
+  const [isMobilePropsOpen, setIsMobilePropsOpen] = useState(false);
 
   // --- History State ---
   const [past, setPast] = useState<{texts: TextElement[], mainImage: ImageElement | null, lines: LineElement[]}[]>([]);
@@ -33,8 +34,9 @@ const App = () => {
     img.crossOrigin = "Anonymous";
     img.onload = () => {
       // Calculate dimensions to fit viewport roughly
-      const maxW = window.innerWidth * 0.7;
-      const maxH = window.innerHeight * 0.8;
+      const isMobile = window.innerWidth < 768;
+      const maxW = window.innerWidth * (isMobile ? 0.9 : 0.7);
+      const maxH = window.innerHeight * (isMobile ? 0.6 : 0.8);
       const ratio = Math.min(maxW / img.width, maxH / img.height);
       
       setMainImage({
@@ -65,7 +67,8 @@ const App = () => {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
-    if (file && file.type.startsWith('image/')) {
+    const validTypes = ['image/png', 'image/jpeg', 'image/webp'];
+    if (file && validTypes.includes(file.type)) {
       const reader = new FileReader();
       reader.onload = (f) => handleImageLoad(f.target?.result as string);
       reader.readAsDataURL(file);
@@ -74,9 +77,10 @@ const App = () => {
 
   const handlePaste = useCallback((e: ClipboardEvent) => {
     const items = e.clipboardData?.items;
+    const validTypes = ['image/png', 'image/jpeg', 'image/webp'];
     if (items) {
       for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf("image") !== -1) {
+        if (validTypes.includes(items[i].type)) {
           const blob = items[i].getAsFile();
           if (blob) {
             const reader = new FileReader();
@@ -349,65 +353,87 @@ const App = () => {
   return (
     <div className="flex flex-col h-screen bg-neutral-900 text-neutral-100 font-sans">
       {/* Header */}
-      <header className="border-b border-neutral-800 p-4 flex items-center justify-between bg-neutral-900/50 backdrop-blur-md">
-        <h1 className="text-xl font-black tracking-tighter flex items-center gap-2">
+      <header className="border-b border-neutral-800 p-3 md:p-4 flex items-center justify-between bg-neutral-900/50 backdrop-blur-md z-20 relative">
+        <h1 className="text-lg md:text-xl font-black tracking-tighter flex items-center gap-2">
           <span className="bg-yellow-400 text-black px-2 py-0.5 rounded">MEME</span> GEN
         </h1>
         
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1 mr-2 border-r border-neutral-800 pr-6">
+        <div className="flex items-center gap-2 md:gap-4">
+          <div className="flex items-center gap-1 mr-1 md:mr-2 border-r border-neutral-800 pr-2 md:pr-6">
             <button 
               onClick={undo} 
               disabled={past.length === 0}
-              className="p-2 text-neutral-400 hover:text-white disabled:opacity-30 disabled:hover:text-neutral-400 transition-colors rounded-lg hover:bg-neutral-800"
+              className="p-1.5 md:p-2 text-neutral-400 hover:text-white disabled:opacity-30 disabled:hover:text-neutral-400 transition-colors rounded-lg hover:bg-neutral-800"
               title="Undo (Ctrl+Z)"
             >
-              <Undo2 size={18} />
+              <Undo2 size={18} className="w-4 h-4 md:w-[18px] md:h-[18px]" />
             </button>
             <button 
               onClick={redo} 
               disabled={future.length === 0}
-              className="p-2 text-neutral-400 hover:text-white disabled:opacity-30 disabled:hover:text-neutral-400 transition-colors rounded-lg hover:bg-neutral-800"
+              className="p-1.5 md:p-2 text-neutral-400 hover:text-white disabled:opacity-30 disabled:hover:text-neutral-400 transition-colors rounded-lg hover:bg-neutral-800"
               title="Redo (Ctrl+Y)"
             >
-              <Redo2 size={18} />
+              <Redo2 size={18} className="w-4 h-4 md:w-[18px] md:h-[18px]" />
             </button>
           </div>
           <button 
             onClick={downloadMeme}
-            className="flex items-center gap-2 bg-yellow-400 text-black font-bold px-4 py-1.5 rounded-lg hover:bg-yellow-300 transition-colors text-sm"
+            className="flex items-center gap-1 md:gap-2 bg-yellow-400 text-black font-bold px-3 md:px-4 py-1.5 rounded-lg hover:bg-yellow-300 transition-colors text-xs md:text-sm"
           >
-            <Download size={16} /> Export
+            <Download size={16} className="w-3.5 h-3.5 md:w-4 md:h-4" /> <span className="hidden sm:inline">Export</span>
           </button>
         </div>
       </header>
 
-      <main className="flex flex-1 overflow-hidden">
+      <main className="flex flex-col md:flex-row flex-1 overflow-hidden relative">
         {/* Toolbar */}
-        <aside className="w-16 border-r border-neutral-800 flex flex-col items-center py-4 gap-4 bg-neutral-900">
+        <aside className="w-full md:w-16 h-14 md:h-auto border-t md:border-t-0 md:border-r border-neutral-800 flex flex-row md:flex-col items-center justify-between md:justify-start py-2 md:py-4 px-4 md:px-0 bg-neutral-900 z-20 order-2 md:order-1 shrink-0">
+          
+          {/* Mobile About Button */}
           <button 
-            onClick={() => setTool('select')}
-            className={`p-3 rounded-xl transition-all ${tool === 'select' ? 'bg-yellow-400 text-black' : 'bg-neutral-800 hover:bg-neutral-700 text-white'}`}
-            title="Select Tool"
+            onClick={() => setIsAboutOpen(true)}
+            className="md:hidden p-2 text-neutral-400 hover:text-white transition-all"
+            title="About"
           >
-            <MousePointer2 size={24} />
+            <HelpCircle size={20} />
           </button>
+
+          <div className="flex flex-row md:flex-col items-center gap-2 md:gap-4">
+            <button 
+              onClick={() => setTool('select')}
+              className={`p-2 md:p-3 rounded-xl transition-all ${tool === 'select' ? 'bg-yellow-400 text-black' : 'bg-neutral-800 hover:bg-neutral-700 text-white'}`}
+              title="Select Tool"
+            >
+              <MousePointer2 size={20} className="md:w-6 md:h-6" />
+            </button>
+            <button 
+              onClick={() => setTool('draw')}
+              className={`p-2 md:p-3 rounded-xl transition-all ${tool === 'draw' ? 'bg-yellow-400 text-black' : 'bg-neutral-800 hover:bg-neutral-700 text-white'}`}
+              title="Draw Tool"
+            >
+              <PenTool size={20} className="md:w-6 md:h-6" />
+            </button>
+            <div className="w-[1px] h-6 md:w-8 md:h-[1px] bg-neutral-800 mx-1 md:my-2" />
+            <button 
+              onClick={addText}
+              className="p-2 md:p-3 bg-neutral-800 rounded-xl hover:bg-yellow-400 hover:text-black transition-all"
+              title="Add Text"
+            >
+              <Type size={20} className="md:w-6 md:h-6" />
+            </button>
+          </div>
+          
+          {/* Mobile Properties Toggle */}
           <button 
-            onClick={() => setTool('draw')}
-            className={`p-3 rounded-xl transition-all ${tool === 'draw' ? 'bg-yellow-400 text-black' : 'bg-neutral-800 hover:bg-neutral-700 text-white'}`}
-            title="Draw Tool"
+            onClick={() => setIsMobilePropsOpen(!isMobilePropsOpen)}
+            className={`md:hidden p-2 rounded-xl transition-all ${isMobilePropsOpen ? 'bg-yellow-400 text-black' : 'bg-neutral-800 text-white'}`}
+            title="Properties"
           >
-            <PenTool size={24} />
+            <Settings2 size={20} />
           </button>
-          <div className="w-8 h-[1px] bg-neutral-800 my-2" />
-          <button 
-            onClick={addText}
-            className="p-3 bg-neutral-800 rounded-xl hover:bg-yellow-400 hover:text-black transition-all"
-            title="Add Text"
-          >
-            <Type size={24} />
-          </button>
-          <div className="mt-auto p-3 text-neutral-500 text-[10px] text-center">
+
+          <div className="hidden md:block mt-auto p-3 text-neutral-500 text-[10px] text-center">
             <button 
               onClick={() => setIsAboutOpen(true)}
               className="p-2 bg-neutral-800 rounded-full hover:bg-yellow-400 hover:text-black transition-all mx-auto flex items-center justify-center"
@@ -420,7 +446,7 @@ const App = () => {
 
         {/* Canvas Area */}
         <section 
-          className="flex-1 relative bg-[radial-gradient(#222_1px,transparent_1px)] [background-size:20px_20px] flex items-center justify-center p-8 overflow-auto"
+          className="flex-1 relative bg-[radial-gradient(#222_1px,transparent_1px)] [background-size:20px_20px] flex items-center justify-center p-4 md:p-8 overflow-auto order-1 md:order-2"
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
@@ -429,12 +455,12 @@ const App = () => {
               <div className="flex flex-col items-center justify-center pt-5 pb-6 text-neutral-500 group-hover:text-yellow-400 transition-colors">
                 <Upload size={48} className="mb-4 opacity-50 group-hover:opacity-100" />
                 <p className="mb-2 text-xl font-semibold">Click to upload or drag and drop</p>
-                <p className="text-sm opacity-70">SVG, PNG, JPG or GIF</p>
+                <p className="text-sm opacity-70">PNG, JPG, or WEBP</p>
                 <div className="mt-6 flex items-center gap-2 text-sm bg-neutral-800 px-3 py-1.5 rounded-lg text-neutral-400">
                   <ClipboardPaste size={16} /> Or paste an image from clipboard
                 </div>
               </div>
-              <input type="file" className="hidden" onChange={onFileUpload} accept="image/*" />
+              <input type="file" className="hidden" onChange={onFileUpload} accept="image/png, image/jpeg, image/webp" />
             </label>
           ) : (
             <div className="shadow-2xl shadow-black/50 leading-[0]">
@@ -482,11 +508,24 @@ const App = () => {
           )}
         </section>
 
+        {/* Mobile Overlay */}
+        {isMobilePropsOpen && (
+          <div 
+            className="md:hidden absolute inset-0 bg-black/50 z-20"
+            onClick={() => setIsMobilePropsOpen(false)}
+          />
+        )}
+
         {/* Properties Panel */}
-        <aside className="w-80 border-l border-neutral-800 bg-neutral-900/95 backdrop-blur-xl flex flex-col shadow-2xl z-10">
-          <div className="p-4 border-b border-neutral-800 flex items-center gap-2">
-            <Settings2 size={18} className="text-yellow-400" />
-            <h2 className="text-sm font-bold uppercase tracking-widest text-neutral-200">Properties</h2>
+        <aside className={`absolute md:static top-0 right-0 bottom-14 md:bottom-0 w-80 md:w-80 border-l border-neutral-800 bg-neutral-900/95 backdrop-blur-xl flex flex-col shadow-2xl z-30 transition-transform duration-300 ${isMobilePropsOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'} order-3`}>
+          <div className="p-4 border-b border-neutral-800 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Settings2 size={18} className="text-yellow-400" />
+              <h2 className="text-sm font-bold uppercase tracking-widest text-neutral-200">Properties</h2>
+            </div>
+            <button className="md:hidden text-neutral-400 hover:text-white p-1" onClick={() => setIsMobilePropsOpen(false)}>
+              <X size={20} />
+            </button>
           </div>
           
           <div className="flex-1 overflow-y-auto p-5">
