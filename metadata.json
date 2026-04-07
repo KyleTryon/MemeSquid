@@ -1,5 +1,5 @@
 {
-  "name": "Meme Generator",
-  "description": "A simple in-browser meme generator with canvas-based editing.",
+  "name": "MemeGen",
+  "description": "Free online meme generator with text, images, and drawing tools.",
   "requestFramePermissions": []
 }
