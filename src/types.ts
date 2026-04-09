@@ -43,6 +43,8 @@ export interface OverlayImageElement {
   scaleX?: number;
   scaleY?: number;
   zIndex?: number;
+  bgRemoved?: boolean;
+  originalSrc?: string;
 }
 
 export interface LineElement {

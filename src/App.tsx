@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Text, Transformer, Line as KonvaLine } from 'react-konva';
-import { Upload, Link as LinkIcon, Type, Download, Trash2, ClipboardPaste, Settings2, AlignLeft, Palette, Box, ChevronDown, Undo2, Redo2, AlignCenter, AlignRight, MoveHorizontal, MoveVertical, PenTool, MousePointer2, HelpCircle, X, Copy, Image as ImageIcon } from 'lucide-react';
+import { Html } from 'react-konva-utils';
+import { Upload, Link as LinkIcon, Type, Download, Trash2, ClipboardPaste, Settings2, AlignLeft, Palette, Box, ChevronDown, Undo2, Redo2, AlignCenter, AlignRight, MoveHorizontal, MoveVertical, PenTool, MousePointer2, HelpCircle, X, Copy, Image as ImageIcon, Wand2, Loader2 } from 'lucide-react';
 import { TextElement, ImageElement, LineElement, OverlayImageElement } from './types';
 import { Canvg } from 'canvg';
 
@@ -20,6 +21,12 @@ const App = () => {
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isMobilePropsOpen, setIsMobilePropsOpen] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+
+  // --- Background Removal State ---
+  const [bgRemovalStatus, setBgRemovalStatus] = useState<'idle' | 'warning' | 'downloading' | 'processing'>('idle');
+  const [bgRemovalProgress, setBgRemovalProgress] = useState(0);
+  const workerRef = useRef<Worker | null>(null);
+  const [contextMenuPos, setContextMenuPos] = useState<{x: number, y: number} | null>(null);
 
   // --- History State ---
   const [past, setPast] = useState<{texts: TextElement[], mainImage: ImageElement | null, lines: LineElement[], images: OverlayImageElement[]}[]>([]);
@@ -154,6 +161,169 @@ const App = () => {
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
   }, [handlePaste]);
+
+  // --- Background Removal Logic ---
+  const applyMask = useCallback(async (originalImageUrl: string, maskData: Uint8Array | Float32Array, maskWidth: number, maskHeight: number, channels: number) => {
+    return new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "Anonymous";
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject("No ctx");
+
+        ctx.drawImage(img, 0, 0);
+
+        const maskCanvas = document.createElement('canvas');
+        maskCanvas.width = maskWidth;
+        maskCanvas.height = maskHeight;
+        const maskCtx = maskCanvas.getContext('2d');
+        if (!maskCtx) return reject("No mask ctx");
+
+        const maskImageData = maskCtx.createImageData(maskWidth, maskHeight);
+        const isFloat = maskData instanceof Float32Array;
+        
+        for (let i = 0; i < maskWidth * maskHeight; i++) {
+          let alpha = 255;
+          if (channels === 1) {
+            alpha = maskData[i];
+          } else if (channels === 4) {
+            alpha = maskData[i * 4 + 3];
+          } else if (channels === 3) {
+            alpha = maskData[i * 3]; // Use R channel
+          }
+          
+          if (isFloat) {
+            alpha = Math.round(alpha * 255);
+          }
+          
+          maskImageData.data[i * 4] = 0;
+          maskImageData.data[i * 4 + 1] = 0;
+          maskImageData.data[i * 4 + 2] = 0;
+          maskImageData.data[i * 4 + 3] = alpha;
+        }
+        maskCtx.putImageData(maskImageData, 0, 0);
+
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.drawImage(maskCanvas, 0, 0, canvas.width, canvas.height);
+
+        const finalImg = new Image();
+        finalImg.onload = () => resolve(finalImg);
+        finalImg.onerror = reject;
+        finalImg.src = canvas.toDataURL('image/png');
+      };
+      img.onerror = reject;
+      img.src = originalImageUrl;
+    });
+  }, []);
+
+  const initWorker = useCallback(() => {
+    if (!workerRef.current) {
+      workerRef.current = new Worker(new URL('./bgRemovalWorker.ts', import.meta.url), { type: 'module' });
+      workerRef.current.onmessage = async (e) => {
+        const { type, data } = e.data;
+        if (type === 'PROGRESS') {
+          if (data.status === 'progress') {
+            setBgRemovalProgress(Math.round((data.loaded / data.total) * 100));
+          }
+        } else if (type === 'INIT_DONE') {
+          setBgRemovalStatus('processing');
+        } else if (type === 'RESULT') {
+          const { id, maskData, width, height, channels } = data;
+          
+          setImages(prev => {
+            const targetImage = prev.find(i => i.id === id);
+            if (!targetImage) return prev;
+            
+            // We need the original image URL
+            const canvas = document.createElement('canvas');
+            canvas.width = targetImage.image.width;
+            canvas.height = targetImage.image.height;
+            const ctx = canvas.getContext('2d');
+            ctx?.drawImage(targetImage.image, 0, 0);
+            const originalUrl = canvas.toDataURL('image/png');
+
+            applyMask(originalUrl, maskData, width, height, channels).then(newImg => {
+              setImages(currentImages => currentImages.map(img => 
+                img.id === id ? { ...img, image: newImg, bgRemoved: true, originalSrc: originalUrl } : img
+              ));
+              setBgRemovalStatus('idle');
+            }).catch(err => {
+              console.error("Failed to apply mask", err);
+              setBgRemovalStatus('idle');
+            });
+            
+            return prev; // State update happens asynchronously above
+          });
+        } else if (type === 'ERROR') {
+          console.error("Worker error:", data);
+          setBgRemovalStatus('idle');
+          alert("Background removal failed: " + data);
+        }
+      };
+    }
+  }, [applyMask]);
+
+  const handleRemoveBackgroundClick = useCallback(() => {
+    if (!selectedId || !selectedId.startsWith('image-')) return;
+    
+    const hasAccepted = localStorage.getItem('bg-model-accepted');
+    if (!hasAccepted) {
+      setBgRemovalStatus('warning');
+    } else {
+      startBackgroundRemoval();
+    }
+  }, [selectedId]);
+
+  const startBackgroundRemoval = useCallback(() => {
+    if (!selectedId || !selectedId.startsWith('image-')) return;
+    
+    const targetImage = images.find(i => i.id === selectedId);
+    if (!targetImage || targetImage.bgRemoved) return;
+
+    setBgRemovalStatus('downloading');
+    setBgRemovalProgress(0);
+    initWorker();
+
+    // Convert image to data URL to send to worker
+    const canvas = document.createElement('canvas');
+    canvas.width = targetImage.image.width;
+    canvas.height = targetImage.image.height;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(targetImage.image, 0, 0);
+    }
+    const imageUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+    workerRef.current?.postMessage({ type: 'INIT' });
+    
+    // Wait for INIT_DONE to set status to processing
+    const interval = setInterval(() => {
+      setBgRemovalStatus(currentStatus => {
+        if (currentStatus === 'processing') {
+          clearInterval(interval);
+          workerRef.current?.postMessage({
+            type: 'REMOVE_BG',
+            data: { imageUrl, id: selectedId }
+          });
+        }
+        return currentStatus;
+      });
+    }, 100);
+  }, [selectedId, images, initWorker]);
+
+  const acceptModelDownload = useCallback(() => {
+    localStorage.setItem('bg-model-accepted', 'true');
+    startBackgroundRemoval();
+  }, [startBackgroundRemoval]);
+
+  const cancelModelDownload = useCallback(() => {
+    setBgRemovalStatus('idle');
+  }, []);
 
   // --- History Logic ---
   useEffect(() => {
@@ -470,7 +640,7 @@ const App = () => {
   return (
     <div className="flex flex-col h-screen bg-neutral-900 text-neutral-100 font-sans">
       {/* Header */}
-      <header className="border-b border-neutral-800 p-3 md:p-4 flex items-center justify-between bg-neutral-900/50 backdrop-blur-md z-40 relative">
+      <header className="border-b border-neutral-800 p-3 md:p-4 flex items-center justify-between bg-neutral-900/50 backdrop-blur-md z-50 relative">
         <h1 className="text-lg md:text-xl font-black tracking-tighter flex items-center gap-2">
           <span className="bg-yellow-400 text-black px-2 py-0.5 rounded">MEME</span> GEN
         </h1>
@@ -494,17 +664,17 @@ const App = () => {
               <Redo2 size={18} className="w-4 h-4 md:w-[18px] md:h-[18px]" />
             </button>
           </div>
-          <div className="relative">
+          <div className="relative z-50">
             <div className="flex items-stretch h-8 md:h-9">
               <button 
                 onClick={() => exportMeme('png')}
-                className="flex items-center gap-1 md:gap-2 bg-yellow-400 text-black font-bold px-3 md:px-4 rounded-l-lg hover:bg-yellow-300 transition-colors text-xs md:text-sm border-r border-yellow-500"
+                className="flex items-center gap-1 md:gap-2 bg-yellow-400 text-black font-bold px-3 md:px-4 rounded-l-lg hover:bg-yellow-300 transition-colors text-xs md:text-sm border-r border-yellow-500 h-full"
               >
                 <Download size={16} className="w-3.5 h-3.5 md:w-4 md:h-4" /> <span className="hidden sm:inline">Export</span>
               </button>
               <button
                 onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
-                className="bg-yellow-400 text-black px-1.5 rounded-r-lg hover:bg-yellow-300 transition-colors flex items-center justify-center"
+                className="bg-yellow-400 text-black px-1.5 rounded-r-lg hover:bg-yellow-300 transition-colors flex items-center justify-center h-full"
               >
                 <ChevronDown size={16} className="w-4 h-4" />
               </button>
@@ -655,6 +825,9 @@ const App = () => {
                           }}
                           onChange={updateImage}
                           tool={tool}
+                          onRemoveBg={handleRemoveBackgroundClick}
+                          bgRemovalStatus={bgRemovalStatus}
+                          bgRemovalProgress={bgRemovalProgress}
                         />
                       );
                     } else {
@@ -1134,6 +1307,44 @@ const App = () => {
           </div>
         </div>
       )}
+
+      {/* Background Removal Warning Modal */}
+      {bgRemovalStatus === 'warning' && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 max-w-md w-full shadow-2xl relative">
+            <button 
+              onClick={cancelModelDownload}
+              className="absolute top-4 right-4 text-neutral-400 hover:text-white transition-colors"
+            >
+              <X size={20} />
+            </button>
+            <div className="flex items-center gap-3 mb-4 text-yellow-400">
+              <Wand2 size={28} />
+              <h2 className="text-xl font-bold text-white">Download AI Model?</h2>
+            </div>
+            <p className="text-neutral-300 mb-4 leading-relaxed">
+              To remove backgrounds locally in your browser, we need to download the RMBG-2.0 AI model (approximately 176 MB).
+            </p>
+            <p className="text-neutral-400 text-sm mb-6">
+              This only happens once. The model will be cached in your browser for future use.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button 
+                onClick={cancelModelDownload}
+                className="px-4 py-2 rounded-lg font-medium text-neutral-300 hover:text-white hover:bg-neutral-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={acceptModelDownload}
+                className="px-4 py-2 rounded-lg font-bold bg-yellow-400 text-black hover:bg-yellow-300 transition-colors"
+              >
+                Download & Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1226,18 +1437,48 @@ const TextElementItem = memo(({ data, isSelected, onSelect, onChange, tool }: an
   );
 });
 
-const OverlayImageElementItem = memo(({ data, isSelected, onSelect, onChange, tool }: any) => {
+const OverlayImageElementItem = memo(({ data, isSelected, onSelect, onChange, tool, onRemoveBg, bgRemovalStatus, bgRemovalProgress }: any) => {
   const shapeRef = useRef<any>(null);
   const trRef = useRef<any>(null);
   const dragStartPos = useRef<{ x: number, y: number } | null>(null);
   const lockedAxis = useRef<'x' | 'y' | null>(null);
+  const htmlDivRef = useRef<HTMLDivElement | null>(null);
+
+  const updateHtmlPos = useCallback(() => {
+    if (shapeRef.current && htmlDivRef.current) {
+      const node = shapeRef.current;
+      const transform = node.getAbsoluteTransform();
+      const center = transform.point({ x: node.width() / 2, y: node.height() / 2 });
+      
+      const scaledHeight = node.height() * Math.abs(node.scaleY());
+      
+      const x = center.x;
+      const y = center.y + scaledHeight / 2 + 20;
+      
+      htmlDivRef.current.style.transform = `translate(${x}px, ${y}px) translateX(-50%)`;
+    }
+  }, []);
+
+  const setHtmlDivRef = useCallback((node: HTMLDivElement | null) => {
+    htmlDivRef.current = node;
+    if (node) {
+      updateHtmlPos();
+    }
+  }, [updateHtmlPos]);
 
   useEffect(() => {
     if (isSelected) {
       trRef.current.nodes([shapeRef.current]);
       trRef.current.getLayer().batchDraw();
+      updateHtmlPos();
     }
-  }, [isSelected]);
+  }, [isSelected, updateHtmlPos]);
+
+  useEffect(() => {
+    if (isSelected) {
+      updateHtmlPos();
+    }
+  }, [data.x, data.y, data.width, data.height, data.scaleX, data.scaleY, data.rotation, isSelected, updateHtmlPos]);
 
   const handleDragStart = (e: any) => {
     dragStartPos.current = { x: e.target.x(), y: e.target.y() };
@@ -1264,6 +1505,12 @@ const OverlayImageElementItem = memo(({ data, isSelected, onSelect, onChange, to
     } else {
       lockedAxis.current = null;
     }
+
+    updateHtmlPos();
+  };
+
+  const handleTransform = () => {
+    updateHtmlPos();
   };
 
   return (
@@ -1277,6 +1524,7 @@ const OverlayImageElementItem = memo(({ data, isSelected, onSelect, onChange, to
         onTap={() => onSelect(data.id)}
         onDragStart={handleDragStart}
         onDragMove={handleDragMove}
+        onTransform={handleTransform}
         onDragEnd={(e) => {
           onChange(data.id, {
             x: round2(e.target.x()),
@@ -1303,6 +1551,29 @@ const OverlayImageElementItem = memo(({ data, isSelected, onSelect, onChange, to
             return newBox;
           }}
         />
+      )}
+      {isSelected && tool === 'select' && !data.bgRemoved && (
+        <Html>
+          <div 
+            ref={setHtmlDivRef}
+            style={{ position: 'absolute', top: 0, left: 0, transformOrigin: 'top left' }}
+            className="flex items-center justify-center"
+          >
+            <button
+              onClick={onRemoveBg}
+              disabled={bgRemovalStatus === 'downloading' || bgRemovalStatus === 'processing'}
+              className="flex items-center gap-2 bg-neutral-900/90 backdrop-blur-md border border-neutral-700 text-white px-4 py-2 rounded-full shadow-2xl hover:bg-neutral-800 hover:border-yellow-400 transition-all text-sm font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {bgRemovalStatus === 'downloading' ? (
+                <><Loader2 size={16} className="animate-spin text-yellow-400" /> Downloading Model... {bgRemovalProgress}%</>
+              ) : bgRemovalStatus === 'processing' ? (
+                <><Loader2 size={16} className="animate-spin text-yellow-400" /> Removing Background...</>
+              ) : (
+                <><Wand2 size={16} className="text-yellow-400" /> Remove Background</>
+              )}
+            </button>
+          </div>
+        </Html>
       )}
     </React.Fragment>
   );
