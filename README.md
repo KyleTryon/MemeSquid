@@ -6,6 +6,7 @@ A premium, in-browser meme generator built with React, TypeScript, Vite, and Kon
 
 - **Flexible Image Upload:** Drag and drop, paste from clipboard, or upload via file selector.
 - **Advanced Text Editing:** Add multiple text layers, drag to position, and use transformer handles to resize.
+- **Local Background Removal:** Easily add stickers and assets to your image and remove the backgrounds. 100% local, in-browser.
 - **Premium Properties Panel:**
   - **Typography:** Change font family, size, and alignment.
   - **Colors:** Customize fill and stroke (outline) colors.
