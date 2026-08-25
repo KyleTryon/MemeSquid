@@ -36,7 +36,7 @@ removals while the model remains cached.
 
 ## Local Development
 
-1. Install Node.js 26.3.1 or newer (but below 27) and enable [Corepack](https://nodejs.org/api/corepack.html):
+1. Install Node.js 22.12.0 or newer (but below 27) and enable [Corepack](https://nodejs.org/api/corepack.html):
    ```bash
    corepack enable
    ```
