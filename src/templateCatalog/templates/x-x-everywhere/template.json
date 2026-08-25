@@ -1,0 +1,20 @@
+{
+  "id": "x-x-everywhere",
+  "title": "X, X Everywhere",
+  "aliases": [
+    "Dicks everywhere",
+    "Toy Story",
+    "Toystory everywhere",
+    "Woody and Buzz Lightyear pointing"
+  ],
+  "tags": ["buzz-lightyear", "everywhere", "toy-story", "woody"],
+  "groupIds": ["toy-story", "x-x-everywhere"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "91538330",
+      "url": "https://imgflip.com/memetemplate/91538330/X-X-Everywhere"
+    }
+  ],
+  "image": { "width": 2118, "height": 1440 }
+}

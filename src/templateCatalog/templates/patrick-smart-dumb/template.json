@@ -1,0 +1,20 @@
+{
+  "id": "patrick-smart-dumb",
+  "title": "Patrick, Smart Dumb",
+  "aliases": [
+    "Patrick",
+    "Patrick dumb and smart",
+    "patrick scientists vs nail-board",
+    "patrick star"
+  ],
+  "tags": ["dumb", "patrick", "patrick-star", "smart", "spongebob"],
+  "groupIds": ["patrick-smart-dumb", "spongebob-squarepants"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "183221332",
+      "url": "https://imgflip.com/memetemplate/183221332/PAtrick-Smart-Dumb"
+    }
+  ],
+  "image": { "width": 724, "height": 1014 }
+}

@@ -21,30 +21,39 @@ export interface TextElement {
   zIndex?: number;
 }
 
-export interface ImageElement {
-  id: string;
-  type: 'image';
-  image: HTMLImageElement | HTMLCanvasElement;
+export type CanvasFill = { type: 'transparent' } | { type: 'solid'; color: string };
+
+export interface CanvasState {
+  width: number;
+  height: number;
+  fill: CanvasFill;
+}
+
+export interface CropRect {
   x: number;
   y: number;
   width: number;
   height: number;
 }
 
-export interface OverlayImageElement {
+interface BaseImageElement {
   id: string;
-  type: 'overlayImage';
   image: HTMLImageElement | HTMLCanvasElement;
   x: number;
   y: number;
   width: number;
   height: number;
-  rotation?: number;
+  crop: CropRect;
   scaleX?: number;
   scaleY?: number;
-  zIndex?: number;
   bgRemoved?: boolean;
   originalSrc?: string;
+}
+
+export interface ImageElement extends BaseImageElement {
+  type: 'image';
+  rotation?: number;
+  zIndex?: number;
 }
 
 export interface LineElement {

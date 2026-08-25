@@ -1,0 +1,19 @@
+{
+  "id": "simpsons-grandpa-with-kids",
+  "title": "Simpsons grandpa with kids",
+  "aliases": [],
+  "tags": ["grandpa", "simpsons"],
+  "groupIds": ["simpsons"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "164766225",
+      "url": "https://imgflip.com/memetemplate/164766225"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/abe-simpson-talking-to-kids"
+    }
+  ],
+  "image": { "width": 512, "height": 384 }
+}

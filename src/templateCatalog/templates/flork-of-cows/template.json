@@ -1,0 +1,15 @@
+{
+  "id": "flork-of-cows",
+  "title": "Flork of Cows",
+  "aliases": [],
+  "tags": ["cows", "flork"],
+  "groupIds": ["flork", "flork-of-cows"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "456150035",
+      "url": "https://imgflip.com/memetemplate/456150035/Flork-of-cows"
+    }
+  ],
+  "image": { "width": 774, "height": 697 }
+}

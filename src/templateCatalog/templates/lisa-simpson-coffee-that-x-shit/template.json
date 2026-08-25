@@ -1,0 +1,15 @@
+{
+  "id": "lisa-simpson-coffee-that-x-shit",
+  "title": "Lisa Simpson Coffee That X Shit",
+  "aliases": ["lisa drinks coffee"],
+  "tags": ["coffee", "lisa", "simpsons"],
+  "groupIds": ["simpsons", "the-simpsons"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "108625481",
+      "url": "https://imgflip.com/memetemplate/108625481/Lisa-Simpson-Coffee-That-x-shit"
+    }
+  ],
+  "image": { "width": 722, "height": 528 }
+}

@@ -1,0 +1,30 @@
+nodeVersion: 26.3.1
+engineStrict: true
+autoInstallPeers: false
+strictPeerDependencies: true
+strictDepBuilds: true
+verifyDepsBeforeRun: error
+savePrefix: ''
+
+allowBuilds:
+  esbuild: true
+  onnxruntime-node: true
+  protobufjs: true
+  sharp: true
+  workerd: true
+
+minimumReleaseAgeExclude:
+  - '@types/node@26.2.0'
+  - '@types/react-dom@19.2.5'
+  - '@typescript-eslint/eslint-plugin@8.68.0'
+  - '@typescript-eslint/parser@8.68.0'
+  - '@typescript-eslint/project-service@8.68.0'
+  - '@typescript-eslint/scope-manager@8.68.0'
+  - '@typescript-eslint/tsconfig-utils@8.68.0'
+  - '@typescript-eslint/type-utils@8.68.0'
+  - '@typescript-eslint/types@8.68.0'
+  - '@typescript-eslint/typescript-estree@8.68.0'
+  - '@typescript-eslint/utils@8.68.0'
+  - '@typescript-eslint/visitor-keys@8.68.0'
+  - lucide-react@1.34.0
+  - typescript-eslint@8.68.0

@@ -1,0 +1,15 @@
+{
+  "id": "flork-thumbs-up-2",
+  "title": "Flork Thumbs Up 2",
+  "aliases": ["thumbs up"],
+  "tags": ["flork", "thumbs-up"],
+  "groupIds": ["flork", "flork-of-cows"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "664287609",
+      "url": "https://imgflip.com/memetemplate/664287609/Flork-thumbs-up-2"
+    }
+  ],
+  "image": { "width": 362, "height": 354 }
+}

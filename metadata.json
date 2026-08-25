@@ -1,5 +1,5 @@
 {
-  "name": "MemeGen",
-  "description": "Free online meme generator with text, images, and drawing tools.",
+  "name": "MemeSquid",
+  "description": "A free, local-first meme editor with background removal, image layers, text, drawing, and high-quality export.",
   "requestFramePermissions": []
 }

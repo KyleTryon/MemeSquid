@@ -1,0 +1,15 @@
+{
+  "id": "flork-of-cows-presentation",
+  "title": "Flork of Cows Presentation",
+  "aliases": ["presentation"],
+  "tags": ["cows", "flork", "presentation"],
+  "groupIds": ["flork", "flork-of-cows"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "596450512",
+      "url": "https://imgflip.com/memetemplate/596450512/Flork-of-cows-Presentation-blank"
+    }
+  ],
+  "image": { "width": 2039, "height": 1359 }
+}

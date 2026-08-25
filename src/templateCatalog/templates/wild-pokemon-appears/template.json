@@ -1,0 +1,15 @@
+{
+  "id": "wild-pokemon-appears",
+  "title": "Wild Pokémon Appears",
+  "aliases": ["wild x appears"],
+  "tags": ["appears", "pokemon", "wild"],
+  "groupIds": ["pokemon", "wild-pokemon-appears"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "216036135",
+      "url": "https://imgflip.com/memetemplate/216036135/Blank-Wild-Pokemon-Appears"
+    }
+  ],
+  "image": { "width": 1242, "height": 1216 }
+}

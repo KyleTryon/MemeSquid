@@ -1,0 +1,15 @@
+{
+  "id": "ol-reliable",
+  "title": "Ol' Reliable",
+  "aliases": [],
+  "tags": ["ol-reliable"],
+  "groupIds": [],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "139937960",
+      "url": "https://imgflip.com/memetemplate/139937960/Ol-Reliable"
+    }
+  ],
+  "image": { "width": 960, "height": 1444 }
+}

@@ -1,74 +1,62 @@
-import { pipeline, env } from '@huggingface/transformers';
+import { pipeline, env, PretrainedConfig } from '@huggingface/transformers';
+import type { BackgroundRemovalPipeline, ProgressInfo } from '@huggingface/transformers';
 
-// Skip local model check since we are running in browser
 env.allowLocalModels = false;
 
-let segmenter: any = null;
+type BackgroundRemovalWorkerRequest =
+  { type: 'INIT' } | { type: 'REMOVE_BG'; data: { imageUrl: string; id: string } };
 
-self.onmessage = async (e) => {
-  const { type, data } = e.data;
+let segmenter: BackgroundRemovalPipeline | null = null;
+const backgroundRemovalConfig = new PretrainedConfig({ model_type: 'birefnet' });
 
-  if (type === 'INIT') {
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : 'Background removal failed';
+
+const reportProgress = (progress: ProgressInfo) => {
+  self.postMessage({ type: 'PROGRESS', data: progress });
+};
+
+const loadSegmenter = (device: 'webgpu' | 'wasm') =>
+  pipeline('background-removal', 'briaai/RMBG-1.4', {
+    config: backgroundRemovalConfig,
+    device,
+    progress_callback: reportProgress,
+  });
+
+self.onmessage = async (event: MessageEvent<BackgroundRemovalWorkerRequest>) => {
+  const message = event.data;
+
+  if (message.type === 'INIT') {
     try {
-      segmenter = await pipeline('background-removal', 'briaai/RMBG-1.4', {
-        config: { model_type: 'birefnet' },
-        device: 'webgpu',
-        progress_callback: (progress: any) => {
-          self.postMessage({ type: 'PROGRESS', data: progress });
-        }
-      });
+      segmenter = await loadSegmenter('webgpu');
       self.postMessage({ type: 'INIT_DONE' });
-    } catch (err) {
-      console.warn("WebGPU failed, falling back to WASM", err);
+    } catch (webGpuError) {
+      console.warn('WebGPU failed, falling back to WASM', webGpuError);
       try {
-        segmenter = await pipeline('background-removal', 'briaai/RMBG-1.4', {
-          config: { model_type: 'birefnet' },
-          device: 'wasm',
-          progress_callback: (progress: any) => {
-            self.postMessage({ type: 'PROGRESS', data: progress });
-          }
-        });
+        segmenter = await loadSegmenter('wasm');
         self.postMessage({ type: 'INIT_DONE' });
-      } catch (err2: any) {
-        self.postMessage({ type: 'ERROR', data: err2.message });
+      } catch (wasmError) {
+        self.postMessage({ type: 'ERROR', data: getErrorMessage(wasmError) });
       }
     }
-  } else if (type === 'REMOVE_BG') {
-    try {
-      const { imageUrl, id } = data;
-      
-      if (!segmenter) {
-        throw new Error("Model not initialized");
-      }
+    return;
+  }
 
-      // Run background removal
-      const result = await segmenter(imageUrl);
+  try {
+    if (!segmenter) throw new Error('Model not initialized');
 
-      // result is a RawImage with 4 channels (RGBA) for background-removal pipeline
-      let maskImage: any = null;
-      if (Array.isArray(result)) {
-        const fg = result.find((r: any) => r.label === 'foreground' || r.label === 'LABEL_1') || result[0];
-        maskImage = fg.mask || fg;
-      } else {
-        maskImage = result;
-      }
-
-      if (!maskImage) {
-        throw new Error("No mask returned from model");
-      }
-
-      self.postMessage({
-        type: 'RESULT',
-        data: {
-          id,
-          maskData: maskImage.data,
-          width: maskImage.width,
-          height: maskImage.height,
-          channels: maskImage.channels || 1
-        }
-      });
-    } catch (err: any) {
-      self.postMessage({ type: 'ERROR', data: err.message });
-    }
+    const result = await segmenter(message.data.imageUrl);
+    self.postMessage({
+      type: 'RESULT',
+      data: {
+        id: message.data.id,
+        maskData: result.data,
+        width: result.width,
+        height: result.height,
+        channels: result.channels,
+      },
+    });
+  } catch (error) {
+    self.postMessage({ type: 'ERROR', data: getErrorMessage(error) });
   }
 };

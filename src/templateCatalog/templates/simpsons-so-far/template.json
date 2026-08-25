@@ -1,0 +1,15 @@
+{
+  "id": "simpsons-so-far",
+  "title": "Simpsons So Far",
+  "aliases": [],
+  "tags": ["simpsons", "so-far"],
+  "groupIds": ["simpsons", "the-simpsons"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "131745903",
+      "url": "https://imgflip.com/memetemplate/131745903/Simpsons-so-far"
+    }
+  ],
+  "image": { "width": 831, "height": 710 }
+}
