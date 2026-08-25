@@ -1,0 +1,19 @@
+{
+  "id": "ancient-aliens",
+  "title": "Ancient Aliens",
+  "aliases": ["Aliens Guy", "Giorgio Tsoukalos"],
+  "tags": ["conspiracy", "explanation", "speculation"],
+  "groupIds": ["ancient-aliens"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "101470",
+      "url": "https://imgflip.com/memetemplate/101470/Ancient-Aliens"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/ancient-aliens"
+    }
+  ],
+  "image": { "width": 500, "height": 436 }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "star-wars",
+  "kind": "property",
+  "name": "Star Wars",
+  "aliases": [],
+  "references": [
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/subcultures/star-wars"
+    }
+  ]
+}

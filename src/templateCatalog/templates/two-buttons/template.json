@@ -1,0 +1,19 @@
+{
+  "id": "two-buttons",
+  "title": "Two Buttons",
+  "aliases": ["Daily Struggle"],
+  "tags": ["choice", "dilemma", "indecision"],
+  "groupIds": ["jake-clark"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "87743020",
+      "url": "https://imgflip.com/memetemplate/87743020/Two-Buttons"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/daily-struggle-two-buttons"
+    }
+  ],
+  "image": { "width": 600, "height": 908 }
+}

@@ -1,0 +1,9 @@
+{
+  "id": "ancient-aliens",
+  "kind": "property",
+  "name": "Ancient Aliens",
+  "aliases": [],
+  "references": [
+    { "kind": "know-your-meme", "url": "https://knowyourmeme.com/memes/ancient-aliens" }
+  ]
+}

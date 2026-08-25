@@ -1,0 +1,19 @@
+{
+  "id": "whisper-and-goosebumps",
+  "title": "Whisper in Ear Goosebumps",
+  "aliases": ["Whisper and Goosebumps"],
+  "tags": ["anticipation", "excitement", "reaction"],
+  "groupIds": [],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "101956210",
+      "url": "https://imgflip.com/memetemplate/101956210/Whisper-and-Goosebumps"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/whisper-in-ear-goosebumps"
+    }
+  ],
+  "image": { "width": 600, "height": 600 }
+}

@@ -1,0 +1,19 @@
+{
+  "id": "imagination-spongebob",
+  "title": "Imagination SpongeBob",
+  "aliases": ["SpongeBob Rainbow"],
+  "tags": ["reaction", "sarcasm", "wonder"],
+  "groupIds": ["spongebob-squarepants"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "163573",
+      "url": "https://imgflip.com/memetemplate/163573/Imagination-Spongebob"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/imagination-spongebob"
+    }
+  ],
+  "image": { "width": 500, "height": 366 }
+}

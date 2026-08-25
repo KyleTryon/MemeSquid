@@ -75,6 +75,18 @@ pnpm template:add --imgflip "https://imgflip.com/memetemplate/516512053/Flork"
 Use `--image` together with `--imgflip` to supply a downloaded local image while retaining the
 Imgflip reference. Imgflip imports always require confirmation unless `--yes` is passed.
 
+Replace an existing template's image from a local file or HTTPS URL without changing its curated
+metadata. The command regenerates both WebP assets and updates the recorded image dimensions:
+
+```bash
+pnpm template:image:update --id boardroom-meeting-suggestion --image ./incoming/boardroom.png
+pnpm template:image:update --id boardroom-meeting-suggestion \
+  --image "https://example.com/boardroom.png"
+```
+
+Use `--dry-run` to download, process, and validate the replacement without writing. Interactive
+runs ask for confirmation; non-interactive writes require `--yes`.
+
 Templates can share reusable property or artist groups. Property groups represent the franchise
 or intellectual property that a template comes from. Add a group before assigning templates to it:
 

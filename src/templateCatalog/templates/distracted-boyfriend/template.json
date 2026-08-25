@@ -1,0 +1,19 @@
+{
+  "id": "distracted-boyfriend",
+  "title": "Distracted Boyfriend",
+  "aliases": ["Man Looking at Other Woman", "Unfaithful Guy"],
+  "tags": ["comparison", "distraction", "temptation"],
+  "groupIds": ["antonio-guillem"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "112126428",
+      "url": "https://imgflip.com/memetemplate/112126428/Distracted-Boyfriend"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/distracted-boyfriend"
+    }
+  ],
+  "image": { "width": 1200, "height": 800 }
+}

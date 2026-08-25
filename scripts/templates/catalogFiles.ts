@@ -60,14 +60,14 @@ export interface TemplateDraft {
   references: readonly CatalogReference[];
 }
 
-export interface AddedTemplate {
+export interface ProcessedTemplateImage {
   metadata: MemeTemplateMetadata;
   destination: string;
   sourceBytes: number;
   thumbnailBytes: number;
 }
 
-export interface AddOptions {
+export interface CatalogWriteOptions {
   dryRun?: boolean;
 }
 
@@ -199,7 +199,7 @@ export async function readGroups(projectRoot: string): Promise<TemplateGroup[]> 
 export async function addGroup(
   projectRoot: string,
   draft: GroupDraft,
-  options: AddOptions = {},
+  options: CatalogWriteOptions = {},
 ): Promise<TemplateGroup> {
   const paths = getCatalogPaths(projectRoot);
   const group = canonicalizeGroup(draft);
@@ -233,8 +233,8 @@ export async function addTemplate(
   projectRoot: string,
   imageInput: TemplateImageInput,
   draft: TemplateDraft,
-  options: AddOptions = {},
-): Promise<AddedTemplate> {
+  options: CatalogWriteOptions = {},
+): Promise<ProcessedTemplateImage> {
   const paths = getCatalogPaths(projectRoot);
   const normalizedId = slugify(draft.id);
   if (!normalizedId) throw new Error('Template ID must contain at least one letter or number.');
@@ -256,7 +256,7 @@ export async function addTemplate(
   await assertUniqueSourceImage(paths.templates, source);
 
   const metadata = canonicalizeTemplate({ ...normalizedDraft, image: { width, height } });
-  const result: AddedTemplate = {
+  const result: ProcessedTemplateImage = {
     metadata,
     destination,
     sourceBytes: source.byteLength,
@@ -267,13 +267,79 @@ export async function addTemplate(
   await mkdir(paths.templates, { recursive: true });
   const temporary = await mkdtemp(path.join(paths.templates, `.tmp-${metadata.id}-`));
   try {
-    const metadataJson = await stringifyRecord(metadata);
-    await Promise.all([
-      writeFile(path.join(temporary, 'source.webp'), source, { flag: 'wx' }),
-      writeFile(path.join(temporary, 'thumbnail.webp'), thumbnail, { flag: 'wx' }),
-      writeFile(path.join(temporary, 'template.json'), metadataJson, { flag: 'wx' }),
-    ]);
+    await writeTemplateDirectory(temporary, metadata, source, thumbnail);
     await rename(temporary, destination);
+  } catch (error) {
+    await rm(temporary, { recursive: true, force: true });
+    throw error;
+  }
+
+  return result;
+}
+
+export async function updateTemplateImage(
+  projectRoot: string,
+  id: string,
+  imageInput: TemplateImageInput,
+  options: CatalogWriteOptions = {},
+): Promise<ProcessedTemplateImage> {
+  const paths = getCatalogPaths(projectRoot);
+  const templateId = id.trim();
+  if (!templateId || slugify(templateId) !== templateId) {
+    throw new Error('Template ID must use lowercase kebab-case.');
+  }
+
+  const destination = path.join(paths.templates, templateId);
+  const metadataPath = path.join(destination, 'template.json');
+  let existingMetadata: MemeTemplateMetadata;
+  try {
+    existingMetadata = await parseJsonFile(metadataPath, memeTemplateMetadataSchema);
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') {
+      throw new Error(`Template "${templateId}" does not exist.`, { cause: error });
+    }
+    throw error;
+  }
+  if (existingMetadata.id !== templateId) {
+    throw new Error(
+      `Template ID "${existingMetadata.id}" does not match directory "${templateId}".`,
+    );
+  }
+
+  const { source, thumbnail, width, height } = await processTemplateImage(imageInput);
+  await assertUniqueSourceImage(paths.templates, source, templateId);
+  const metadata = memeTemplateMetadataSchema.parse({
+    ...existingMetadata,
+    image: { width, height },
+  });
+  const result: ProcessedTemplateImage = {
+    metadata,
+    destination,
+    sourceBytes: source.byteLength,
+    thumbnailBytes: thumbnail.byteLength,
+  };
+  if (options.dryRun) return result;
+
+  const temporary = await mkdtemp(path.join(paths.templates, `.tmp-${templateId}-`));
+  const backup = path.join(paths.templates, `.tmp-${templateId}-backup-${randomUUID()}`);
+  try {
+    await writeTemplateDirectory(temporary, metadata, source, thumbnail);
+    await rename(destination, backup);
+    try {
+      await rename(temporary, destination);
+    } catch (error) {
+      try {
+        await rename(backup, destination);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          `Could not replace template "${templateId}" or restore its original files.`,
+          { cause: rollbackError },
+        );
+      }
+      throw error;
+    }
+    await rm(backup, { recursive: true, force: true });
   } catch (error) {
     await rm(temporary, { recursive: true, force: true });
     throw error;
@@ -398,10 +464,10 @@ async function checkTemplateDirectory(
       }
       imgflipTemplateIds.set(imgflipReference.templateId, id);
     }
-    const [sourceMetadata, thumbnailMetadata, source] = await Promise.all([
-      sharp(sourcePath).metadata(),
-      sharp(thumbnailPath).metadata(),
-      readFile(sourcePath),
+    const [source, thumbnail] = await Promise.all([readFile(sourcePath), readFile(thumbnailPath)]);
+    const [sourceMetadata, thumbnailMetadata] = await Promise.all([
+      sharp(source).metadata(),
+      sharp(thumbnail).metadata(),
     ]);
     if (sourceMetadata.format !== 'webp') errors.push(`Template "${id}" source is not WebP.`);
     if (thumbnailMetadata.format !== 'webp') errors.push(`Template "${id}" thumbnail is not WebP.`);
@@ -479,11 +545,16 @@ async function processTemplateImage(imageInput: TemplateImageInput): Promise<{
   return { source, thumbnail, width, height };
 }
 
-async function assertUniqueSourceImage(templatesPath: string, source: Buffer): Promise<void> {
+async function assertUniqueSourceImage(
+  templatesPath: string,
+  source: Buffer,
+  excludedTemplateId?: string,
+): Promise<void> {
   const targetHash = hashBuffer(source);
   const entries = await readDirectoryOrEmpty(templatesPath);
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith('.tmp-')) continue;
+    if (!entry.isDirectory() || entry.name.startsWith('.tmp-') || entry.name === excludedTemplateId)
+      continue;
     const existingPath = path.join(templatesPath, entry.name, 'source.webp');
     try {
       const existing = await readFile(existingPath);
@@ -495,6 +566,20 @@ async function assertUniqueSourceImage(templatesPath: string, source: Buffer): P
       throw error;
     }
   }
+}
+
+async function writeTemplateDirectory(
+  directory: string,
+  metadata: MemeTemplateMetadata,
+  source: Buffer,
+  thumbnail: Buffer,
+): Promise<void> {
+  const metadataJson = await stringifyRecord(metadata);
+  await Promise.all([
+    writeFile(path.join(directory, 'source.webp'), source, { flag: 'wx' }),
+    writeFile(path.join(directory, 'thumbnail.webp'), thumbnail, { flag: 'wx' }),
+    writeFile(path.join(directory, 'template.json'), metadataJson, { flag: 'wx' }),
+  ]);
 }
 
 async function assertUniqueImgflipReference(

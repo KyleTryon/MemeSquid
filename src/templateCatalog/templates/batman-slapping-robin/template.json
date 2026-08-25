@@ -1,0 +1,19 @@
+{
+  "id": "batman-slapping-robin",
+  "title": "Batman Slapping Robin",
+  "aliases": ["Batman Slaps Robin", "My Parents Are Dead"],
+  "tags": ["argument", "correction", "interruption"],
+  "groupIds": ["batman"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "438680",
+      "url": "https://imgflip.com/memetemplate/438680/Batman-Slapping-Robin"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/my-parents-are-dead-batman-slapping-robin"
+    }
+  ],
+  "image": { "width": 400, "height": 387 }
+}

@@ -1,0 +1,7 @@
+{
+  "id": "flex-seal",
+  "kind": "property",
+  "name": "Flex Seal",
+  "aliases": [],
+  "references": [{ "kind": "know-your-meme", "url": "https://knowyourmeme.com/memes/flex-tape" }]
+}

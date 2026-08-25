@@ -1,0 +1,19 @@
+{
+  "id": "flex-tape",
+  "title": "Flex Tape",
+  "aliases": ["Phil Swift Flex Tape"],
+  "tags": ["damage", "quick-fix", "repair"],
+  "groupIds": ["flex-seal"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "166969924",
+      "url": "https://imgflip.com/memetemplate/166969924/Flex-Tape"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/flex-tape"
+    }
+  ],
+  "image": { "width": 510, "height": 572 }
+}

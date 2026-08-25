@@ -1,0 +1,12 @@
+{
+  "id": "godzilla",
+  "kind": "property",
+  "name": "Godzilla",
+  "aliases": [],
+  "references": [
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/subcultures/godzilla"
+    }
+  ]
+}

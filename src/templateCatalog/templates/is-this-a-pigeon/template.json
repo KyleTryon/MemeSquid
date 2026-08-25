@@ -1,0 +1,19 @@
+{
+  "id": "is-this-a-pigeon",
+  "title": "Is This a Pigeon?",
+  "aliases": ["Is This a Butterfly?"],
+  "tags": ["confusion", "misidentification", "question"],
+  "groupIds": ["the-brave-fighter-of-sun-fighbird"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "100777631",
+      "url": "https://imgflip.com/memetemplate/100777631/Is-This-A-Pigeon"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/is-this-a-pigeon"
+    }
+  ],
+  "image": { "width": 1587, "height": 1425 }
+}

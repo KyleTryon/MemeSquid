@@ -11,6 +11,7 @@ import {
   createReferences,
   getCatalogPaths,
   slugify,
+  updateTemplateImage,
 } from './catalogFiles.ts';
 
 void test('slugify creates stable catalog IDs', () => {
@@ -61,6 +62,7 @@ void test('group and template additions are validated, processed, and transactio
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'memesquid-template-test-'));
   const paths = getCatalogPaths(projectRoot);
   const inputPath = path.join(projectRoot, 'input.png');
+  const replacementPath = path.join(projectRoot, 'replacement.png');
 
   try {
     await mkdir(paths.templates, { recursive: true });
@@ -77,6 +79,16 @@ void test('group and template additions are validated, processed, and transactio
     })
       .png()
       .toFile(inputPath);
+    await sharp({
+      create: {
+        width: 1800,
+        height: 900,
+        channels: 3,
+        background: '#d64045',
+      },
+    })
+      .png()
+      .toFile(replacementPath);
 
     const group = await addGroup(projectRoot, {
       id: 'example-property',
@@ -147,6 +159,29 @@ void test('group and template additions are validated, processed, and transactio
         references: [],
       }),
       /Unknown group "missing"/u,
+    );
+
+    const originalSource = await readFile(path.join(result.destination, 'source.webp'));
+    const dryRun = await updateTemplateImage(projectRoot, 'example-template', replacementPath, {
+      dryRun: true,
+    });
+    assert.deepEqual(dryRun.metadata.image, { width: 1800, height: 900 });
+    assert.deepEqual(await readFile(path.join(result.destination, 'source.webp')), originalSource);
+
+    const updated = await updateTemplateImage(projectRoot, 'example-template', replacementPath);
+    assert.deepEqual(updated.metadata, {
+      ...result.metadata,
+      image: { width: 1800, height: 900 },
+    });
+    assert.notDeepEqual(
+      await readFile(path.join(result.destination, 'source.webp')),
+      originalSource,
+    );
+    assert.deepEqual(await checkCatalog(projectRoot), []);
+
+    await assert.rejects(
+      updateTemplateImage(projectRoot, 'missing-template', replacementPath),
+      /Template "missing-template" does not exist/u,
     );
     assert.deepEqual((await readdirTemplateNames(paths.templates)).sort(), [
       '.gitkeep',

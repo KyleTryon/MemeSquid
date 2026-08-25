@@ -1,0 +1,19 @@
+{
+  "id": "clown-applying-makeup",
+  "title": "Putting on Clown Makeup",
+  "aliases": ["Clown Applying Makeup", "Clown Makeup Tutorial"],
+  "tags": ["foolishness", "progression", "self-deception"],
+  "groupIds": [],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "195515965",
+      "url": "https://imgflip.com/memetemplate/195515965/Clown-Applying-Makeup"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/putting-on-clown-makeup"
+    }
+  ],
+  "image": { "width": 750, "height": 798 }
+}

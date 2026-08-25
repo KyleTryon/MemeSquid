@@ -1,0 +1,19 @@
+{
+  "id": "this-is-where-id-put-my-trophy-if-i-had-one",
+  "title": "This Is Where I'd Put My Trophy, If I Had One",
+  "aliases": ["This Is Where I'd Put My X"],
+  "tags": ["disappointment", "missing", "wish"],
+  "groupIds": ["the-fairly-oddparents"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "3218037",
+      "url": "https://imgflip.com/memetemplate/3218037/This-Is-Where-Id-Put-My-Trophy-If-I-Had-One"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/this-is-where-id-put-my-trophy-if-i-had-one"
+    }
+  ],
+  "image": { "width": 300, "height": 418 }
+}

@@ -1,0 +1,19 @@
+{
+  "id": "blank-nut-button",
+  "title": "Nut Button",
+  "aliases": ["Blank Nut Button"],
+  "tags": ["impulse", "reaction", "temptation"],
+  "groupIds": [],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "119139145",
+      "url": "https://imgflip.com/memetemplate/119139145/Blank-Nut-Button"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/nut-button"
+    }
+  ],
+  "image": { "width": 600, "height": 446 }
+}

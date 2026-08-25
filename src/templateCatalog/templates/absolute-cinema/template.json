@@ -1,0 +1,19 @@
+{
+  "id": "absolute-cinema",
+  "title": "Absolute Cinema",
+  "aliases": ["Kino Is Served", "Martin Scorsese Cinema"],
+  "tags": ["approval", "masterpiece", "reaction"],
+  "groupIds": [],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "505705955",
+      "url": "https://imgflip.com/memetemplate/505705955/Absolute-Cinema"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/absolute-cinema"
+    }
+  ],
+  "image": { "width": 936, "height": 725 }
+}

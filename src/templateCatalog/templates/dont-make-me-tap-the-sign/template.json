@@ -1,0 +1,19 @@
+{
+  "id": "dont-make-me-tap-the-sign",
+  "title": "Don't Make Me Tap the Sign",
+  "aliases": [],
+  "tags": ["frustration", "instruction", "reminder"],
+  "groupIds": ["the-simpsons"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "145699196",
+      "url": "https://imgflip.com/memetemplate/145699196/Dont-make-me-tap-the-sign"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/dont-make-me-tap-the-sign"
+    }
+  ],
+  "image": { "width": 640, "height": 947 }
+}

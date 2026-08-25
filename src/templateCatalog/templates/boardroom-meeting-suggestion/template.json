@@ -1,0 +1,16 @@
+{
+  "id": "boardroom-meeting-suggestion",
+  "title": "Boardroom Meeting Suggestion",
+  "aliases": ["Boardroom Suggestion", "Thrown Out of the Window"],
+  "tags": ["consumer-advocacy", "rejection", "workplace"],
+  "groupIds": ["hejibits"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "1035805",
+      "url": "https://imgflip.com/memetemplate/1035805/Boardroom-Meeting-Suggestion"
+    },
+    { "kind": "know-your-meme", "url": "https://knowyourmeme.com/memes/boardroom-suggestion" }
+  ],
+  "image": { "width": 1024, "height": 2236 }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "the-fairly-oddparents",
+  "kind": "property",
+  "name": "The Fairly OddParents",
+  "aliases": ["Fairly Odd Parents"],
+  "references": [
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/subcultures/the-fairly-oddparents"
+    }
+  ]
+}

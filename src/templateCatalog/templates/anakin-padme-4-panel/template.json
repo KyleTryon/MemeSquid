@@ -1,0 +1,19 @@
+{
+  "id": "anakin-padme-4-panel",
+  "title": "For the Better, Right?",
+  "aliases": ["Anakin and Padmé Four-Panel", "Clueless Padmé"],
+  "tags": ["dialogue", "misunderstanding", "suspicion"],
+  "groupIds": ["star-wars"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "322841258",
+      "url": "https://imgflip.com/memetemplate/322841258/Anakin-Padme-4-Panel"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/for-the-better-right"
+    }
+  ],
+  "image": { "width": 768, "height": 768 }
+}

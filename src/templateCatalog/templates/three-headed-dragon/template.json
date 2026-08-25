@@ -1,0 +1,19 @@
+{
+  "id": "three-headed-dragon",
+  "title": "Three-Headed Dragon",
+  "aliases": ["King Ghidorah", "Three Dragon Heads"],
+  "tags": ["comparison", "incompetence", "trio"],
+  "groupIds": ["godzilla", "michael-j-larson"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "187102311",
+      "url": "https://imgflip.com/memetemplate/187102311/Three-headed-Dragon"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/three-headed-dragon"
+    }
+  ],
+  "image": { "width": 680, "height": 544 }
+}

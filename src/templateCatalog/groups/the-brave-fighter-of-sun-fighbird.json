@@ -1,0 +1,12 @@
+{
+  "id": "the-brave-fighter-of-sun-fighbird",
+  "kind": "property",
+  "name": "The Brave Fighter of Sun Fighbird",
+  "aliases": ["Fighbird"],
+  "references": [
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/is-this-a-pigeon"
+    }
+  ]
+}

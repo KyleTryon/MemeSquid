@@ -1,8 +1,8 @@
 import type { ImgflipTemplateReference } from '../../src/templateCatalog/schemas.ts';
 import { createImgflipReference, type ParsedImgflipTemplateInput } from './catalogFiles.ts';
+import { downloadRemoteImage, type FetchImageResource } from './remoteImage.ts';
 
 const MAX_PAGE_BYTES = 2 * 1024 * 1024;
-const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 15_000;
 const IMGFLIP_PAGE_HOSTS = new Set(['imgflip.com', 'www.imgflip.com']);
 const IMGFLIP_IMAGE_HOSTS = new Set(['i.imgflip.com', 'imgflip.com', 'www.imgflip.com']);
@@ -14,7 +14,7 @@ const HTML_NAMED_ENTITIES: Readonly<Record<string, string>> = {
   '&quot;': '"',
 };
 
-export type FetchTemplateResource = (input: string | URL, init?: RequestInit) => Promise<Response>;
+export type FetchTemplateResource = FetchImageResource;
 
 export interface ResolvedImgflipTemplate {
   image: Buffer;
@@ -47,31 +47,16 @@ export async function resolveImgflipTemplate(
 
   const reference = resolveReference(input, html);
   const imageUrl = extractImageUrl(html, pageUrl);
-  const imageResponse = await fetchResource(imageUrl, {
-    headers: {
-      accept: 'image/avif,image/webp,image/png,image/jpeg,*/*;q=0.8',
-      'user-agent': 'MemeSquid template importer',
-    },
-    redirect: 'follow',
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  const downloadedImage = await downloadRemoteImage(imageUrl, {
+    allowedHosts: IMGFLIP_IMAGE_HOSTS,
+    fetchResource,
+    resource: 'Imgflip template image',
+    userAgent: 'MemeSquid template importer',
   });
-  assertSuccessfulResponse(imageResponse, 'Imgflip template image');
-  assertAllowedHost(imageResponse.url || imageUrl, IMGFLIP_IMAGE_HOSTS, 'Imgflip image');
-  assertContentLength(imageResponse, MAX_IMAGE_BYTES, 'Imgflip template image');
-
-  const contentType = imageResponse.headers.get('content-type')?.toLowerCase();
-  if (contentType && !contentType.startsWith('image/')) {
-    throw new Error(`Imgflip image returned an unexpected content type: ${contentType}.`);
-  }
-
-  const image = Buffer.from(await imageResponse.arrayBuffer());
-  if (!image.byteLength || image.byteLength > MAX_IMAGE_BYTES) {
-    throw new Error('Imgflip template image was empty or exceeded the 25 MiB import limit.');
-  }
 
   return {
-    image,
-    imageUrl,
+    image: downloadedImage.image,
+    imageUrl: downloadedImage.url,
     reference,
     title: extractTitle(html),
   };
