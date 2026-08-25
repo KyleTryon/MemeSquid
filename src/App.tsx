@@ -231,6 +231,22 @@ const createTextElement = (
   y: number,
   width?: number,
   fontSize: number = 40,
+  style?: Partial<
+    Pick<
+      TextElement,
+      | 'fill'
+      | 'stroke'
+      | 'strokeWidth'
+      | 'fontFamily'
+      | 'fontWeight'
+      | 'align'
+      | 'shadowColor'
+      | 'shadowBlur'
+      | 'shadowOffsetX'
+      | 'shadowOffsetY'
+      | 'shadowOpacity'
+    >
+  >,
 ): TextElement => ({
   id: `text-${crypto.randomUUID()}`,
   type: 'text',
@@ -252,6 +268,36 @@ const createTextElement = (
   shadowOffsetY: 0,
   shadowOpacity: 1,
   zIndex: Date.now(),
+  ...style,
+});
+
+const getTextStyle = (
+  text: TextElement,
+): Pick<
+  TextElement,
+  | 'fill'
+  | 'stroke'
+  | 'strokeWidth'
+  | 'fontFamily'
+  | 'fontWeight'
+  | 'align'
+  | 'shadowColor'
+  | 'shadowBlur'
+  | 'shadowOffsetX'
+  | 'shadowOffsetY'
+  | 'shadowOpacity'
+> => ({
+  fill: text.fill,
+  stroke: text.stroke,
+  strokeWidth: text.strokeWidth,
+  fontFamily: text.fontFamily,
+  fontWeight: text.fontWeight,
+  align: text.align,
+  shadowColor: text.shadowColor,
+  shadowBlur: text.shadowBlur,
+  shadowOffsetX: text.shadowOffsetX,
+  shadowOffsetY: text.shadowOffsetY,
+  shadowOpacity: text.shadowOpacity,
 });
 
 type BackgroundRemovalState =
@@ -1227,11 +1273,20 @@ const App = () => {
 
   // --- Editor Logic ---
 
+  const lastText = texts[texts.length - 1];
+
   const addText = useCallback(() => {
-    const newText = createTextElement('TOP TEXT', 50, 50);
+    const newText = createTextElement(
+      'TOP TEXT',
+      50,
+      50,
+      undefined,
+      lastText?.fontSize ?? 40,
+      lastText ? getTextStyle(lastText) : undefined,
+    );
     setTexts((prev) => [...prev, newText]);
     setSelectedId(newText.id);
-  }, []);
+  }, [lastText]);
 
   const updateText = useCallback((id: string, attrs: ItemPatch<TextElement>) => {
     setTexts((currentTexts) => patchItemById(currentTexts, id, attrs));
@@ -1563,7 +1618,8 @@ const App = () => {
         placement.x + padding,
         placement.y + Math.max(padding, (placement.height - fontSize) / 2),
         textWidth,
-        fontSize,
+        lastText?.fontSize ?? fontSize,
+        lastText ? getTextStyle(lastText) : undefined,
       );
       setTexts((current) => [...current, text]);
       setSelectedId(text.id);
@@ -1581,7 +1637,7 @@ const App = () => {
         .querySelector<HTMLElement>('.keyboard-layer-controls [aria-pressed="true"]')
         ?.focus();
     });
-  }, [canvas, expansionDraft, shiftContent]);
+  }, [canvas, expansionDraft, lastText, shiftContent]);
 
   const alignElementToCanvas = useCallback(
     (pos: AlignmentPosition) => {
@@ -1975,7 +2031,7 @@ const App = () => {
         {announcement}
       </div>
       {/* Header */}
-      <header className="safe-header relative z-50 flex min-h-14 items-center justify-between border-b border-border bg-background/95 px-3 py-1.5 backdrop-blur-xl md:min-h-0 md:px-5 md:py-3">
+      <header className="safe-header relative z-[100] flex min-h-14 items-center justify-between border-b border-border bg-background/95 px-3 py-1.5 backdrop-blur-xl md:min-h-0 md:px-5 md:py-3">
         <div className="flex items-center gap-3 min-w-0">
           <div className="flex h-9 w-9 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-xl bg-accent text-on-accent">
             <SquidMark className="h-8 w-8 md:h-9 md:w-9" />
@@ -2066,7 +2122,7 @@ const App = () => {
             {isExportMenuOpen && (
               <>
                 <div
-                  className="fixed inset-0 z-40"
+                  className="fixed inset-0 z-[105]"
                   onClick={() => setIsExportMenuOpen(false)}
                   aria-hidden="true"
                 />
@@ -2083,7 +2139,7 @@ const App = () => {
                       setIsExportMenuOpen(false);
                     }
                   }}
-                  className="absolute right-0 top-full mt-2 w-48 bg-surface border border-border rounded-xl shadow-xl overflow-hidden z-50 py-1"
+                  className="absolute right-0 top-full mt-2 w-48 bg-surface border border-border rounded-xl shadow-xl overflow-hidden z-[110] py-1"
                 >
                   <button
                     type="button"
