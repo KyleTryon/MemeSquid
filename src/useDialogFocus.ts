@@ -9,8 +9,12 @@ const DIALOG_FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
-export function useDialogFocus(isOpen: boolean, onDismiss: () => void, trapFocus: boolean = true) {
-  const dialogRef = useRef<HTMLDivElement | null>(null);
+export function useDialogFocus<T extends HTMLElement = HTMLDivElement>(
+  isOpen: boolean,
+  onDismiss: () => void,
+  trapFocus: boolean = true,
+) {
+  const dialogRef = useRef<T | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;

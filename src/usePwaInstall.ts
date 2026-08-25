@@ -12,6 +12,8 @@ type NavigatorWithStandalone = Navigator & {
   readonly standalone?: boolean;
 };
 
+type PwaInstallMode = 'installed' | 'native-prompt' | 'ios-instructions' | 'unavailable';
+
 const isStandalone = () => {
   const navigatorWithStandalone = navigator as NavigatorWithStandalone;
   return (
@@ -26,14 +28,11 @@ const isAppleMobileDevice = () => {
   return isIos || isTouchEnabledIpad;
 };
 
-const isMobileDevice = () => isAppleMobileDevice() || /Android/i.test(navigator.userAgent);
-
 export const usePwaInstall = () => {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(isStandalone);
   const [isInstallHelpOpen, setIsInstallHelpOpen] = useState(false);
   const [isAppleMobile] = useState(isAppleMobileDevice);
-  const [isMobile] = useState(isMobileDevice);
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (event: Event) => {
@@ -77,11 +76,20 @@ export const usePwaInstall = () => {
 
   const dismissInstallHelp = useCallback(() => setIsInstallHelpOpen(false), []);
 
+  const installMode: PwaInstallMode = isInstalled
+    ? 'installed'
+    : installPrompt
+      ? 'native-prompt'
+      : isAppleMobile
+        ? 'ios-instructions'
+        : 'unavailable';
+
   return {
-    canInstall: !isInstalled && (installPrompt !== null || isMobile),
+    canInstall: installMode === 'native-prompt' || installMode === 'ios-instructions',
     dismissInstallHelp,
     install,
     isAppleMobile,
     isInstallHelpOpen,
+    installMode,
   };
 };

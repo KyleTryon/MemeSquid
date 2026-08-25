@@ -9,7 +9,7 @@ import {
   Rect,
 } from 'react-konva';
 import { Html } from 'react-konva-utils';
-import type Konva from 'konva';
+import Konva from 'konva';
 import {
   Upload,
   Link as LinkIcon,
@@ -68,6 +68,15 @@ import {
   getImageSourceSize,
   roundCropRect,
 } from './cropGeometry';
+import {
+  clampZoom,
+  getLogicalPointAtClientPosition,
+  getPinchZoom,
+  getPointCenter,
+  getPointDistance,
+  getScrollDeltaForLogicalPoint,
+  type ViewportPoint,
+} from './canvasViewport';
 import { patchItemById, removeItemById, updateItemById } from './collectionUtils';
 import type { ItemPatch } from './collectionUtils';
 import { useAxisLockedDrag, useSelectedTransformer } from './konvaInteractions';
@@ -123,6 +132,10 @@ type EditorTool = 'select' | 'draw';
 type CanvasSide = 'top' | 'right' | 'bottom' | 'left';
 type CanvasAnchor = AlignmentPosition;
 type ExpansionMode = 'blank' | 'text' | 'image';
+type CanvasPointerEvent = Konva.KonvaEventObject<MouseEvent | TouchEvent>;
+
+const getCanvasPointerPosition = (event: CanvasPointerEvent) =>
+  event.target.getStage()?.getPointerPosition() ?? null;
 
 interface EditorSnapshot {
   canvas: CanvasState | null;
@@ -147,6 +160,12 @@ interface ExpansionDraft {
   mode: ExpansionMode;
   size: number;
   fill: CanvasFill;
+}
+
+interface CanvasPinchGesture {
+  focalPoint: ViewportPoint;
+  initialDistance: number;
+  initialZoom: number;
 }
 
 type CropSession =
@@ -200,6 +219,11 @@ const MAX_CANVAS_SIZE = 8192;
 const MIN_CANVAS_ZOOM = 0.05;
 const MAX_CANVAS_ZOOM = 4;
 const ZOOM_LEVELS = [0.05, 0.1, 0.125, 0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4] as const;
+
+const getTouchPoint = (touch: Touch): ViewportPoint => ({
+  x: touch.clientX,
+  y: touch.clientY,
+});
 
 const createTextElement = (
   text: string,
@@ -344,6 +368,7 @@ const App = () => {
   const [canvasZoom, setCanvasZoom] = useState(1);
   const [fitZoom, setFitZoom] = useState(1);
   const [isFitZoom, setIsFitZoom] = useState(true);
+  const [isZoomHudVisible, setIsZoomHudVisible] = useState(false);
 
   const [tool, setTool] = useState<EditorTool>('select');
   const [drawColor, setDrawColor] = useState('#ff0000');
@@ -353,18 +378,28 @@ const App = () => {
   const [isTemplateLibraryOpen, setIsTemplateLibraryOpen] = useState(false);
   const [loadingTemplateId, setLoadingTemplateId] = useState<string | null>(null);
   const [isMobilePropsOpen, setIsMobilePropsOpen] = useState(false);
+  const [isMobileAddOpen, setIsMobileAddOpen] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [announcement, setAnnouncement] = useState('');
-  const { canInstall, dismissInstallHelp, install, isAppleMobile, isInstallHelpOpen } =
+  const { canInstall, dismissInstallHelp, install, installMode, isAppleMobile, isInstallHelpOpen } =
     usePwaInstall();
   const addImageInputRef = useRef<HTMLInputElement | null>(null);
   const canvasAreaRef = useRef<HTMLElement | null>(null);
+  const canvasViewportRef = useRef<HTMLDivElement | null>(null);
   const exportMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const expansionSideRef = useRef<CanvasSide | null>(null);
   const pendingImagePlacementRef = useRef<ImagePlacement | null>(null);
+  const brushCursorRef = useRef<HTMLDivElement | null>(null);
+  const activeDrawLineIdRef = useRef<string | null>(null);
+  const canvasPinchGestureRef = useRef<CanvasPinchGesture | null>(null);
+  const suppressSingleTouchRef = useRef(false);
+  const gestureFrameRef = useRef<number | null>(null);
+  const zoomHudTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const closeAbout = useCallback(() => setIsAboutOpen(false), []);
+  const closeMobileAdd = useCallback(() => setIsMobileAddOpen(false), []);
+  const closeMobileProps = useCallback(() => setIsMobilePropsOpen(false), []);
   const closeTemplateLibrary = useCallback(() => {
     if (!loadingTemplateId) setIsTemplateLibraryOpen(false);
   }, [loadingTemplateId]);
@@ -377,6 +412,25 @@ const App = () => {
   }, []);
   const aboutDialogRef = useDialogFocus(isAboutOpen, closeAbout);
   const installHelpDialogRef = useDialogFocus(isInstallHelpOpen, dismissInstallHelp);
+  const mobileAddDialogRef = useDialogFocus(isMobileAddOpen, closeMobileAdd);
+  const mobilePropsDialogRef = useDialogFocus<HTMLElement>(isMobilePropsOpen, closeMobileProps);
+
+  const showZoomHud = useCallback(() => {
+    if (zoomHudTimerRef.current) clearTimeout(zoomHudTimerRef.current);
+    setIsZoomHudVisible(true);
+    zoomHudTimerRef.current = setTimeout(() => {
+      setIsZoomHudVisible(false);
+      zoomHudTimerRef.current = null;
+    }, 700);
+  }, []);
+
+  useEffect(() => {
+    const previousHitOnDragEnabled = Konva.hitOnDragEnabled;
+    Konva.hitOnDragEnabled = true;
+    return () => {
+      Konva.hitOnDragEnabled = previousHitOnDragEnabled;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isExportMenuOpen) return;
@@ -590,10 +644,45 @@ const App = () => {
   );
 
   const createBlankCanvas = useCallback(() => {
-    setCanvas({ width: 1080, height: 1080, fill: { type: 'solid', color: '#ffffff' } });
+    if (
+      canvas &&
+      !window.confirm('Start a new blank meme? Your current canvas will be replaced.')
+    ) {
+      return;
+    }
+
+    const nextCanvas: CanvasState = {
+      width: 1080,
+      height: 1080,
+      fill: { type: 'solid', color: '#ffffff' },
+    };
+    const nextSnapshot: EditorSnapshot = {
+      canvas: nextCanvas,
+      images: [],
+      lines: [],
+      texts: [],
+    };
+    isHistoryAction.current = true;
+    lastSaved.current = nextSnapshot;
+    setPast([]);
+    setFuture([]);
+    setHasPendingHistoryChange(false);
+    setCanvas(nextCanvas);
+    setImages([]);
+    setTexts([]);
+    setLines([]);
     setSelectedId(CANVAS_ID);
     setTool('select');
-  }, []);
+    setCropSession(null);
+    setExpansionDraft(null);
+    setCanvasResizeAnchor('tl');
+    setCanvasZoom(1);
+    setIsFitZoom(true);
+    setIsMobilePropsOpen(false);
+    setIsMobileAddOpen(false);
+    pendingBgRemovalRef.current = null;
+    setBgRemovalState({ status: 'idle' });
+  }, [canvas]);
 
   const onFileUpload = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -676,38 +765,60 @@ const App = () => {
     return () => observer.disconnect();
   }, [canvas, isFitZoom]);
 
-  const setManualCanvasZoom = useCallback(
-    (requestedZoom: number) => {
+  const setManualCanvasZoomAtClientPoint = useCallback(
+    (requestedZoom: number, clientPoint: ViewportPoint) => {
       if (!canvas) return;
 
-      const zoom = Math.min(MAX_CANVAS_ZOOM, Math.max(MIN_CANVAS_ZOOM, requestedZoom));
+      const zoom = clampZoom(requestedZoom, MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM);
       const canvasArea = canvasAreaRef.current;
-      const workspacePadding = window.innerWidth < 768 ? 16 : 32;
-      const logicalCenterX =
-        canvasArea && canvasZoom > fitZoom
-          ? (canvasArea.scrollLeft + canvasArea.clientWidth / 2 - workspacePadding) / canvasZoom
-          : canvas.width / 2;
-      const logicalCenterY =
-        canvasArea && canvasZoom > fitZoom
-          ? (canvasArea.scrollTop + canvasArea.clientHeight / 2 - workspacePadding) / canvasZoom
-          : canvas.height / 2;
+      const canvasViewport = canvasViewportRef.current;
+      const logicalPoint = canvasViewport
+        ? getLogicalPointAtClientPosition(
+            canvasViewport.getBoundingClientRect(),
+            clientPoint,
+            canvasZoom,
+          )
+        : { x: canvas.width / 2, y: canvas.height / 2 };
 
       setIsFitZoom(false);
       setCanvasZoom(zoom);
+      showZoomHud();
 
-      window.requestAnimationFrame(() => {
-        if (!canvasArea) return;
+      if (gestureFrameRef.current !== null) {
+        window.cancelAnimationFrame(gestureFrameRef.current);
+      }
+      gestureFrameRef.current = window.requestAnimationFrame(() => {
+        gestureFrameRef.current = null;
+        if (!canvasArea || !canvasViewport) return;
         if (zoom <= fitZoom) {
           canvasArea.scrollTo({ left: 0, top: 0 });
           return;
         }
-        canvasArea.scrollTo({
-          left: Math.max(0, logicalCenterX * zoom + workspacePadding - canvasArea.clientWidth / 2),
-          top: Math.max(0, logicalCenterY * zoom + workspacePadding - canvasArea.clientHeight / 2),
-        });
+
+        const delta = getScrollDeltaForLogicalPoint(
+          canvasViewport.getBoundingClientRect(),
+          clientPoint,
+          logicalPoint,
+          zoom,
+        );
+        canvasArea.scrollBy({ left: delta.x, top: delta.y });
       });
     },
-    [canvas, canvasZoom, fitZoom],
+    [canvas, canvasZoom, fitZoom, showZoomHud],
+  );
+
+  const setManualCanvasZoom = useCallback(
+    (requestedZoom: number) => {
+      const canvasArea = canvasAreaRef.current;
+      if (!canvasArea) return;
+
+      const rect = canvasArea.getBoundingClientRect();
+      setManualCanvasZoomAtClientPoint(requestedZoom, {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      });
+    },
+    [setManualCanvasZoomAtClientPoint],
   );
 
   const zoomCanvasIn = useCallback(() => {
@@ -725,7 +836,8 @@ const App = () => {
     setIsFitZoom(true);
     setCanvasZoom(fitZoom);
     canvasAreaRef.current?.scrollTo({ left: 0, top: 0 });
-  }, [fitZoom]);
+    showZoomHud();
+  }, [fitZoom, showZoomHud]);
 
   useEffect(
     () => () => {
@@ -733,6 +845,10 @@ const App = () => {
       workerRef.current = null;
       workerReadyRef.current = false;
       pendingBgRemovalRef.current = null;
+      if (gestureFrameRef.current !== null) {
+        window.cancelAnimationFrame(gestureFrameRef.current);
+      }
+      if (zoomHudTimerRef.current) clearTimeout(zoomHudTimerRef.current);
     },
     [],
   );
@@ -1062,11 +1178,6 @@ const App = () => {
         cancelExpansion();
         return;
       }
-      if (e.key === 'Escape' && isMobilePropsOpen) {
-        e.preventDefault();
-        setIsMobilePropsOpen(false);
-        return;
-      }
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
@@ -1108,7 +1219,6 @@ const App = () => {
     deleteSelected,
     cropSession,
     expansionDraft,
-    isMobilePropsOpen,
     cancelExpansion,
     zoomCanvasIn,
     zoomCanvasOut,
@@ -1188,20 +1298,14 @@ const App = () => {
     setAnnouncement('Crop canceled.');
   }, []);
 
-  const selectCanvas = useCallback(
-    (openMobileControls: boolean = false) => {
-      if (!canvas || cropSession) return;
+  const selectCanvas = useCallback(() => {
+    if (!canvas || cropSession) return;
 
-      setTool('select');
-      setSelectedId(CANVAS_ID);
-      setExpansionDraft(null);
-      setAnnouncement('Canvas selected.');
-      if (openMobileControls && window.innerWidth < 768) {
-        setIsMobilePropsOpen(true);
-      }
-    },
-    [canvas, cropSession],
-  );
+    setTool('select');
+    setSelectedId(CANVAS_ID);
+    setExpansionDraft(null);
+    setAnnouncement('Canvas selected.');
+  }, [canvas, cropSession]);
 
   const beginImageCrop = useCallback(
     (id: string) => {
@@ -1557,7 +1661,24 @@ const App = () => {
     [selectedId, updateText, updateImage],
   );
 
-  const handleMouseDown = (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+  const updateBrushCursor = (event: CanvasPointerEvent) => {
+    const cursor = brushCursorRef.current;
+    if (!cursor || !(event.evt instanceof MouseEvent)) return;
+
+    const point = getCanvasPointerPosition(event);
+    if (!point) return;
+
+    cursor.style.opacity = '1';
+    cursor.style.transform =
+      `translate3d(${point.x * canvasZoom}px, ${point.y * canvasZoom}px, 0) ` +
+      'translate(-50%, -50%)';
+  };
+
+  const hideBrushCursor = () => {
+    if (brushCursorRef.current) brushCursorRef.current.style.opacity = '0';
+  };
+
+  const handleMouseDown = (event: CanvasPointerEvent) => {
     if (cropSession) return;
     if (tool === 'select') {
       const stage = event.target.getStage();
@@ -1590,12 +1711,14 @@ const App = () => {
 
     if (tool === 'draw') {
       isDrawing.current = true;
-      const pos = event.target.getStage()?.getPointerPosition();
+      const pos = getCanvasPointerPosition(event);
       if (!pos) return;
+      const lineId = `line-${crypto.randomUUID()}`;
+      activeDrawLineIdRef.current = lineId;
       setLines((prev) => [
         ...prev,
         {
-          id: `line-${Date.now()}`,
+          id: lineId,
           type: 'line',
           points: [pos.x, pos.y],
           color: drawColor,
@@ -1605,10 +1728,11 @@ const App = () => {
     }
   };
 
-  const handleMouseMove = (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+  const handleMouseMove = (event: CanvasPointerEvent) => {
+    updateBrushCursor(event);
     if (tool !== 'draw' || !isDrawing.current) return;
 
-    const point = event.target.getStage()?.getPointerPosition();
+    const point = getCanvasPointerPosition(event);
     if (!point) return;
 
     setLines((prev) => {
@@ -1634,12 +1758,142 @@ const App = () => {
   const handleMouseUp = () => {
     if (tool === 'draw' && isDrawing.current) {
       isDrawing.current = false;
+      activeDrawLineIdRef.current = null;
       // Force history save immediately on mouse up for drawing
       setPast((p) => [...p, lastSaved.current].slice(-50));
       setFuture([]);
       lastSaved.current = { canvas, texts, lines, images };
       setHasPendingHistoryChange(false);
     }
+  };
+
+  const handleMouseLeave = () => {
+    hideBrushCursor();
+    handleMouseUp();
+  };
+
+  const cancelActiveCanvasInteraction = () => {
+    const activeLineId = activeDrawLineIdRef.current;
+    if (activeLineId) {
+      setLines((currentLines) => removeItemById(currentLines, activeLineId));
+      activeDrawLineIdRef.current = null;
+    }
+    isDrawing.current = false;
+
+    stageRef.current
+      ?.find((node: Konva.Node) => node.isDragging())
+      .forEach((node) => node.stopDrag());
+  };
+
+  const handleCanvasTouchStart = (event: Konva.KonvaEventObject<TouchEvent>) => {
+    const touches = event.evt.touches;
+    if (touches.length < 2) {
+      if (!suppressSingleTouchRef.current) handleMouseDown(event);
+      return;
+    }
+
+    event.evt.preventDefault();
+    suppressSingleTouchRef.current = true;
+    cancelActiveCanvasInteraction();
+    if (canvasPinchGestureRef.current) return;
+
+    const canvasViewport = canvasViewportRef.current;
+    if (!canvasViewport) return;
+
+    const firstPoint = getTouchPoint(touches[0]);
+    const secondPoint = getTouchPoint(touches[1]);
+    const center = getPointCenter(firstPoint, secondPoint);
+    const initialDistance = getPointDistance(firstPoint, secondPoint);
+    if (initialDistance <= 0) return;
+
+    canvasPinchGestureRef.current = {
+      focalPoint: getLogicalPointAtClientPosition(
+        canvasViewport.getBoundingClientRect(),
+        center,
+        canvasZoom,
+      ),
+      initialDistance,
+      initialZoom: canvasZoom,
+    };
+    showZoomHud();
+  };
+
+  const handleCanvasTouchMove = (event: Konva.KonvaEventObject<TouchEvent>) => {
+    const gesture = canvasPinchGestureRef.current;
+    const touches = event.evt.touches;
+    if (!gesture) {
+      if (!suppressSingleTouchRef.current) handleMouseMove(event);
+      return;
+    }
+    if (touches.length < 2) return;
+
+    event.evt.preventDefault();
+    const firstPoint = getTouchPoint(touches[0]);
+    const secondPoint = getTouchPoint(touches[1]);
+    const center = getPointCenter(firstPoint, secondPoint);
+    const zoom = getPinchZoom(
+      gesture.initialZoom,
+      gesture.initialDistance,
+      getPointDistance(firstPoint, secondPoint),
+      MIN_CANVAS_ZOOM,
+      MAX_CANVAS_ZOOM,
+    );
+
+    setIsFitZoom(false);
+    setCanvasZoom(zoom);
+    showZoomHud();
+
+    if (gestureFrameRef.current !== null) {
+      window.cancelAnimationFrame(gestureFrameRef.current);
+    }
+    gestureFrameRef.current = window.requestAnimationFrame(() => {
+      gestureFrameRef.current = null;
+      const canvasArea = canvasAreaRef.current;
+      const canvasViewport = canvasViewportRef.current;
+      if (!canvasArea || !canvasViewport) return;
+      if (zoom <= fitZoom) {
+        canvasArea.scrollTo({ left: 0, top: 0 });
+        return;
+      }
+
+      const delta = getScrollDeltaForLogicalPoint(
+        canvasViewport.getBoundingClientRect(),
+        center,
+        gesture.focalPoint,
+        zoom,
+      );
+      canvasArea.scrollBy({ left: delta.x, top: delta.y });
+    });
+  };
+
+  const handleCanvasTouchEnd = (event: Konva.KonvaEventObject<TouchEvent>) => {
+    if (canvasPinchGestureRef.current) {
+      event.evt.preventDefault();
+      if (event.evt.touches.length < 2) canvasPinchGestureRef.current = null;
+      if (event.evt.touches.length === 0) suppressSingleTouchRef.current = false;
+      showZoomHud();
+      return;
+    }
+
+    if (suppressSingleTouchRef.current) {
+      if (event.evt.touches.length === 0) suppressSingleTouchRef.current = false;
+      return;
+    }
+    handleMouseUp();
+  };
+
+  const handleCanvasDoubleTap = (event: Konva.KonvaEventObject<TouchEvent>) => {
+    if (tool !== 'select' || cropSession) return;
+
+    event.evt.preventDefault();
+    if (!isFitZoom && Math.abs(canvasZoom - fitZoom) > 0.005) {
+      fitCanvasToViewport();
+      return;
+    }
+
+    const touch = event.evt.changedTouches[0];
+    if (!touch) return;
+    setManualCanvasZoomAtClientPoint(fitZoom >= 1 ? 2 : 1, getTouchPoint(touch));
   };
 
   const exportMeme = useCallback(
@@ -1721,13 +1975,15 @@ const App = () => {
         {announcement}
       </div>
       {/* Header */}
-      <header className="safe-header border-b border-border px-3 py-1.5 md:px-5 md:py-3 flex items-center justify-between bg-background z-50 relative">
+      <header className="safe-header relative z-50 flex min-h-14 items-center justify-between border-b border-border bg-background/95 px-3 py-1.5 backdrop-blur-xl md:min-h-0 md:px-5 md:py-3">
         <div className="flex items-center gap-3 min-w-0">
           <div className="flex h-9 w-9 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-xl bg-accent text-on-accent">
             <SquidMark className="h-8 w-8 md:h-9 md:w-9" />
           </div>
           <div className="min-w-0">
-            <h1 className="hidden min-[360px]:block text-lg md:text-xl font-black tracking-[-0.045em] leading-none text-content-strong">
+            <h1
+              className={`${canvas ? 'hidden min-[430px]:block' : 'block'} text-lg font-black leading-none tracking-[-0.045em] text-content-strong md:block md:text-xl`}
+            >
               meme<span className="text-accent">squid</span>
               <span className="hidden sm:inline text-content-subtle">.com</span>
             </h1>
@@ -1737,7 +1993,18 @@ const App = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 md:gap-4">
+        {!canvas && (
+          <button
+            type="button"
+            onClick={() => setIsAboutOpen(true)}
+            aria-label="About MemeSquid"
+            className="flex h-11 w-11 items-center justify-center rounded-full text-content-muted transition-colors hover:bg-surface hover:text-content-strong md:hidden"
+          >
+            <HelpCircle size={21} />
+          </button>
+        )}
+
+        <div className={`${canvas ? 'flex' : 'hidden md:flex'} items-center gap-1 md:gap-4`}>
           <div className="flex items-center gap-1 md:gap-2 border-r border-border pr-2 md:pr-6">
             <button
               type="button"
@@ -1769,7 +2036,8 @@ const App = () => {
                 aria-label="Export meme as PNG"
                 className="flex min-w-11 items-center justify-center gap-1 md:gap-2 bg-accent text-on-accent font-extrabold px-3 md:px-4 rounded-l-xl hover:bg-accent-hover transition-colors text-xs md:text-sm border-r border-accent-strong h-full disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <Download size={16} className="w-3.5 h-3.5 md:w-4 md:h-4" />{' '}
+                <Share2 size={16} className="h-4 w-4 md:hidden" />
+                <Download size={16} className="hidden h-4 w-4 md:block" />{' '}
                 <span className="hidden sm:inline">Export meme</span>
               </button>
               <button
@@ -1858,73 +2126,106 @@ const App = () => {
         <aside
           role="group"
           aria-label="Editor tools"
-          className="mobile-toolbar w-full md:w-16 md:h-auto border-t md:border-t-0 md:border-r border-border flex flex-row md:flex-col items-center justify-between md:justify-start pt-2 md:py-4 px-4 md:px-0 bg-background/95 z-20 order-2 md:order-1 shrink-0"
+          className={`${canvas ? 'grid' : 'hidden'} mobile-toolbar z-20 order-2 w-full shrink-0 grid-cols-5 border-t border-border bg-background/90 backdrop-blur-xl md:order-1 md:flex md:h-auto md:w-16 md:flex-col md:items-center md:justify-start md:border-r md:border-t-0 md:bg-background/95 md:px-0 md:py-4`}
         >
-          {/* Mobile About Button */}
-          <button
-            type="button"
-            onClick={() => setIsAboutOpen(true)}
-            aria-label="About MemeSquid"
-            className="md:hidden flex h-11 w-11 items-center justify-center rounded-xl text-content-muted hover:bg-surface hover:text-content-strong transition-colors"
-            title="About"
-          >
-            <HelpCircle size={20} />
-          </button>
-
-          <div className="flex flex-row md:flex-col items-center gap-1 md:gap-4">
+          <div className="contents md:flex md:flex-col md:items-center md:gap-4">
             <button
               type="button"
-              onClick={() => setTool('select')}
+              onClick={() => {
+                setTool('select');
+                setIsMobilePropsOpen(false);
+              }}
               disabled={Boolean(cropSession)}
               aria-label="Select tool"
               aria-pressed={tool === 'select'}
-              className={`flex h-11 w-11 md:h-12 md:w-12 items-center justify-center rounded-xl transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${tool === 'select' ? 'bg-accent text-on-accent' : 'bg-surface hover:bg-surface-hover text-content-strong'}`}
+              className={`mobile-tab-item order-1 md:order-1 md:flex md:h-12 md:w-12 md:items-center md:justify-center md:rounded-xl md:transition-colors ${tool === 'select' && !isMobilePropsOpen ? 'text-accent md:bg-accent md:text-on-accent' : 'text-content-muted md:bg-surface md:text-content-strong md:hover:bg-surface-hover'}`}
               title="Select Tool"
             >
               <MousePointer2 size={20} className="md:w-6 md:h-6" />
+              <span className="md:hidden">Select</span>
             </button>
             <button
               type="button"
-              onClick={() => selectCanvas(false)}
+              onClick={selectCanvas}
               disabled={!canvas || Boolean(cropSession)}
               aria-label="Canvas settings"
               aria-pressed={tool === 'select' && selectedId === CANVAS_ID}
-              className={`hidden h-11 w-11 items-center justify-center rounded-xl transition-colors disabled:cursor-not-allowed disabled:opacity-40 md:flex md:h-12 md:w-12 ${tool === 'select' && selectedId === CANVAS_ID ? 'bg-accent text-on-accent' : 'bg-surface text-content-strong hover:bg-surface-hover'}`}
+              className={`hidden h-11 w-11 items-center justify-center rounded-xl transition-colors disabled:cursor-not-allowed disabled:opacity-40 md:order-2 md:flex md:h-12 md:w-12 ${tool === 'select' && selectedId === CANVAS_ID ? 'bg-accent text-on-accent' : 'bg-surface text-content-strong hover:bg-surface-hover'}`}
               title="Canvas settings"
             >
               <LayoutPanelTop size={20} className="md:h-6 md:w-6" />
             </button>
             <button
               type="button"
-              onClick={() => setTool('draw')}
+              onClick={() => {
+                setTool('draw');
+                setIsMobilePropsOpen(true);
+              }}
               disabled={Boolean(cropSession)}
               aria-label="Draw tool"
               aria-pressed={tool === 'draw'}
-              className={`flex h-11 w-11 md:h-12 md:w-12 items-center justify-center rounded-xl transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${tool === 'draw' ? 'bg-accent text-on-accent' : 'bg-surface hover:bg-surface-hover text-content-strong'}`}
+              className={`mobile-tab-item order-4 md:order-3 md:flex md:h-12 md:w-12 md:items-center md:justify-center md:rounded-xl md:transition-colors ${tool === 'draw' ? 'text-accent md:bg-accent md:text-on-accent' : 'text-content-muted md:bg-surface md:text-content-strong md:hover:bg-surface-hover'}`}
               title="Draw Tool"
             >
               <PenTool size={20} className="md:w-6 md:h-6" />
+              <span className="md:hidden">Draw</span>
             </button>
-            <div className="w-px h-7 md:w-8 md:h-px bg-surface md:my-2" aria-hidden="true" />
+            <div
+              className="hidden md:order-4 md:my-2 md:block md:h-px md:w-8 md:bg-surface"
+              aria-hidden="true"
+            />
+            <button
+              type="button"
+              onClick={() => setIsMobileAddOpen(true)}
+              disabled={Boolean(cropSession)}
+              aria-label="Add to meme"
+              aria-expanded={isMobileAddOpen}
+              className="mobile-only-tab mobile-tab-item order-2 text-content-muted md:hidden"
+            >
+              <Plus size={21} />
+              <span>Add</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                addText();
+                setTool('select');
+                setIsMobilePropsOpen(true);
+              }}
+              disabled={Boolean(cropSession)}
+              aria-label="Add text"
+              className="mobile-tab-item order-3 text-content-muted md:order-6 md:flex md:h-12 md:w-12 md:items-center md:justify-center md:rounded-xl md:bg-surface md:text-content-strong md:transition-colors md:hover:bg-accent md:hover:text-on-accent"
+              title="Add Text"
+            >
+              <Type size={20} className="md:w-6 md:h-6" />
+              <span className="md:hidden">Text</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!selectedId) selectCanvas();
+                setTool('select');
+                setIsMobilePropsOpen(true);
+              }}
+              disabled={Boolean(cropSession)}
+              aria-label="Adjust selection"
+              aria-expanded={isMobilePropsOpen}
+              aria-controls="meme-controls"
+              className={`mobile-only-tab mobile-tab-item order-5 md:hidden ${isMobilePropsOpen && tool === 'select' ? 'text-accent' : 'text-content-muted'}`}
+            >
+              <Settings2 size={21} />
+              <span>Adjust</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setIsTemplateLibraryOpen(true)}
               disabled={Boolean(cropSession)}
               aria-label="Browse meme templates"
-              className="flex h-11 w-11 md:h-12 md:w-12 items-center justify-center bg-surface rounded-xl hover:bg-accent hover:text-on-accent transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+              className="hidden h-12 w-12 items-center justify-center rounded-xl bg-surface transition-colors hover:bg-accent hover:text-on-accent disabled:cursor-not-allowed disabled:opacity-40 md:order-5 md:flex"
               title="Templates"
             >
-              <TemplateLibraryIcon size={20} className="md:w-6 md:h-6" />
-            </button>
-            <button
-              type="button"
-              onClick={addText}
-              disabled={Boolean(cropSession)}
-              aria-label="Add text"
-              className="flex h-11 w-11 md:h-12 md:w-12 items-center justify-center bg-surface rounded-xl hover:bg-accent hover:text-on-accent transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-              title="Add Text"
-            >
-              <Type size={20} className="md:w-6 md:h-6" />
+              <TemplateLibraryIcon size={24} />
             </button>
             <button
               type="button"
@@ -1933,11 +2234,11 @@ const App = () => {
                 addImageInputRef.current?.click();
               }}
               disabled={Boolean(cropSession)}
-              className="flex h-11 w-11 md:h-12 md:w-12 items-center justify-center bg-surface rounded-xl hover:bg-accent hover:text-on-accent transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+              className="hidden h-12 w-12 items-center justify-center rounded-xl bg-surface transition-colors hover:bg-accent hover:text-on-accent disabled:cursor-not-allowed disabled:opacity-40 md:order-7 md:flex"
               title="Add Image"
               aria-label="Add image"
             >
-              <ImagePlus size={20} className="md:w-6 md:h-6" />
+              <ImagePlus size={24} />
             </button>
             <input
               ref={addImageInputRef}
@@ -1947,19 +2248,6 @@ const App = () => {
               accept={IMAGE_ACCEPT}
             />
           </div>
-
-          {/* Mobile Properties Toggle */}
-          <button
-            type="button"
-            onClick={() => setIsMobilePropsOpen(!isMobilePropsOpen)}
-            aria-expanded={isMobilePropsOpen}
-            aria-controls="meme-controls"
-            aria-label="Toggle meme controls"
-            className={`md:hidden flex h-11 w-11 items-center justify-center rounded-xl transition-colors ${isMobilePropsOpen ? 'bg-accent text-on-accent' : 'bg-surface text-content-strong'}`}
-            title="Properties"
-          >
-            <Settings2 size={20} />
-          </button>
 
           <div className="hidden md:block mt-auto p-3 text-content-subtle text-[10px] text-center">
             <button
@@ -1980,50 +2268,41 @@ const App = () => {
           ref={canvasAreaRef}
           tabIndex={-1}
           aria-labelledby="editor-workspace-title"
-          className={`flex-1 relative bg-canvas flex p-4 md:p-8 overflow-auto order-1 md:order-2 ${isCanvasScrollable ? 'items-start justify-start' : 'items-center justify-center'}`}
+          className={`relative order-1 flex flex-1 overflow-auto bg-canvas md:order-2 md:p-8 ${canvas ? 'p-3' : 'items-start justify-center p-0 md:items-center'} ${isCanvasScrollable ? 'items-start justify-start' : canvas ? 'items-center justify-center' : ''}`}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           onPointerDown={(event) => {
-            if (event.target === event.currentTarget) selectCanvas(false);
+            if (event.target === event.currentTarget) selectCanvas();
           }}
         >
           <h2 id="editor-workspace-title" className="sr-only">
             Meme editor workspace
           </h2>
-          {canInstall && (
-            <button
-              type="button"
-              onClick={() => void install()}
-              className="absolute right-3 top-3 z-20 flex min-h-11 items-center gap-2 rounded-xl border border-accent/40 bg-background/95 px-3 text-xs font-extrabold text-accent-hover shadow-lg backdrop-blur transition-colors hover:border-accent-hover hover:bg-surface md:right-5 md:top-5 md:text-sm"
-            >
-              <Smartphone size={17} /> Install app
-            </button>
-          )}
           {!canvas ? (
-            <div className="flex flex-col items-center justify-center w-full max-w-2xl min-h-96 border border-border rounded-2xl bg-background transition-colors group">
-              <div className="flex flex-col items-center justify-center px-6 py-10 text-center">
-                <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.12em] text-accent-hover">
+            <div className="group flex min-h-full w-full max-w-2xl flex-col items-center justify-center bg-background transition-colors md:min-h-96 md:rounded-2xl md:border md:border-border">
+              <div className="flex w-full flex-col items-center justify-center px-4 py-5 text-center sm:px-6 md:py-10">
+                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-[9px] font-extrabold uppercase tracking-[0.1em] text-accent-hover sm:mb-5 sm:text-[10px] sm:tracking-[0.12em]">
                   <ShieldCheck size={13} /> Local · Offline · Open source
                 </div>
-                <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent text-on-accent">
-                  <Upload size={28} strokeWidth={2.5} />
+                <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-[1.1rem] bg-accent text-on-accent sm:mb-5 sm:h-16 sm:w-16 sm:rounded-2xl">
+                  <Upload size={26} strokeWidth={2.5} />
                 </div>
-                <h2 className="text-3xl md:text-4xl font-black tracking-[-0.045em] text-content-strong">
+                <h2 className="text-[1.75rem] font-black tracking-[-0.045em] text-content-strong sm:text-3xl md:text-4xl">
                   Meme Editor.
                 </h2>
-                <p className="mt-3 max-w-md text-sm md:text-base leading-relaxed text-content-muted">
+                <p className="mt-2 max-w-md text-[13px] leading-relaxed text-content-muted sm:mt-3 sm:text-sm md:text-base">
                   Remove backgrounds, combine images, add captions, and draw directly in your
                   browser.
                 </p>
-                <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                <div className="mt-5 flex w-full max-w-sm flex-col items-stretch justify-center gap-2.5 sm:mt-6 md:max-w-none md:flex-row md:flex-wrap md:items-center md:gap-3">
                   <button
                     type="button"
                     onClick={() => setIsTemplateLibraryOpen(true)}
-                    className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-extrabold text-on-accent transition-colors hover:bg-accent-hover"
+                    className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.9rem] bg-accent px-5 py-3 text-sm font-extrabold text-on-accent transition-colors hover:bg-accent-hover md:min-h-11 md:rounded-xl"
                   >
                     <TemplateLibraryIcon size={17} /> Browse templates
                   </button>
-                  <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-content-strong px-5 py-3 text-sm font-extrabold text-on-accent hover:bg-content transition-colors">
+                  <label className="inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-[0.9rem] bg-content-strong px-5 py-3 text-sm font-extrabold text-on-accent transition-colors hover:bg-content md:min-h-11 md:rounded-xl">
                     <ImageIcon size={17} /> Choose an image
                     <input
                       type="file"
@@ -2035,24 +2314,53 @@ const App = () => {
                   <button
                     type="button"
                     onClick={createBlankCanvas}
-                    className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-border bg-surface px-5 py-3 text-sm font-bold text-content-strong hover:border-accent hover:text-accent-hover transition-colors"
+                    className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.9rem] border border-border bg-surface px-5 py-3 text-sm font-bold text-content-strong transition-colors hover:border-accent hover:text-accent-hover md:min-h-11 md:rounded-xl"
                   >
                     <LayoutPanelTop size={17} /> Start blank
                   </button>
                 </div>
-                <div className="mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[11px] font-semibold text-content-subtle">
+                <div className="mt-4 hidden flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[11px] font-semibold text-content-subtle min-[375px]:flex sm:mt-6">
                   <span className="flex items-center gap-1.5">
                     <Wand2 size={14} /> One-click background removal
                   </span>
                   <span className="flex items-center gap-1.5">
                     <ClipboardPaste size={14} /> Paste from clipboard
                   </span>
-                  <span>PNG · JPG · WEBP · SVG</span>
+                  <span className="hidden md:inline">PNG · JPG · WEBP · SVG</span>
                 </div>
+                {canInstall && (
+                  <button
+                    type="button"
+                    onClick={() => void install()}
+                    className="mt-4 flex w-full max-w-sm items-center gap-3 rounded-2xl border border-border bg-surface/80 p-3 text-left transition-colors hover:border-border-strong hover:bg-surface md:mt-6"
+                  >
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent text-on-accent">
+                      {installMode === 'ios-instructions' ? (
+                        <Share2 size={21} />
+                      ) : (
+                        <Smartphone size={21} />
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-extrabold text-content-strong">
+                        {installMode === 'ios-instructions'
+                          ? 'Add to Home Screen'
+                          : 'Install MemeSquid'}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-content-muted">
+                        {installMode === 'ios-instructions'
+                          ? 'Open like an app and keep editing offline.'
+                          : 'Launch faster and work offline.'}
+                      </span>
+                    </span>
+                    <ChevronDown size={18} className="-rotate-90 text-content-subtle" />
+                  </button>
+                )}
               </div>
             </div>
           ) : (
             <div
+              ref={canvasViewportRef}
               role="region"
               aria-label="Meme canvas editor"
               aria-describedby="canvas-description"
@@ -2085,20 +2393,27 @@ const App = () => {
                 ))}
               </div>
               <div
-                className={`h-full w-full overflow-hidden shadow-xl shadow-overlay/40 ${canvas.fill.type === 'transparent' ? 'canvas-transparency-grid' : ''}`}
+                className={`relative h-full w-full overflow-hidden shadow-xl shadow-overlay/40 ${canvas.fill.type === 'transparent' ? 'canvas-transparency-grid' : ''}`}
               >
                 <Stage
                   width={canvas.width}
                   height={canvas.height}
                   ref={stageRef}
-                  style={{ transform: `scale(${canvasZoom})`, transformOrigin: 'top left' }}
+                  style={{
+                    cursor: tool === 'draw' ? 'none' : undefined,
+                    transform: `scale(${canvasZoom})`,
+                    transformOrigin: 'top left',
+                  }}
                   onMouseDown={handleMouseDown}
+                  onMouseEnter={updateBrushCursor}
                   onMouseMove={handleMouseMove}
                   onMouseUp={handleMouseUp}
-                  onMouseLeave={handleMouseUp}
-                  onTouchStart={handleMouseDown}
-                  onTouchMove={handleMouseMove}
-                  onTouchEnd={handleMouseUp}
+                  onMouseLeave={handleMouseLeave}
+                  onTouchStart={handleCanvasTouchStart}
+                  onTouchMove={handleCanvasTouchMove}
+                  onTouchEnd={handleCanvasTouchEnd}
+                  onTouchCancel={handleCanvasTouchEnd}
+                  onDblTap={handleCanvasDoubleTap}
                 >
                   <Layer>
                     <Rect
@@ -2169,6 +2484,22 @@ const App = () => {
                     )}
                   </Layer>
                 </Stage>
+                {tool === 'draw' && (
+                  <div
+                    ref={brushCursorRef}
+                    aria-hidden="true"
+                    className="pointer-events-none absolute left-0 top-0 z-10 box-border overflow-hidden rounded-full border border-white opacity-0 shadow-[0_0_0_1px_rgba(0,0,0,0.85)] will-change-transform"
+                    style={{
+                      width: drawWidth * canvasZoom,
+                      height: drawWidth * canvasZoom,
+                    }}
+                  >
+                    <div
+                      className="h-full w-full opacity-20"
+                      style={{ backgroundColor: drawColor }}
+                    />
+                  </div>
+                )}
               </div>
               {selectedId === CANVAS_ID && tool === 'select' && !expansionDraft && !cropSession && (
                 <CanvasEdgeControls canvas={canvas} onAdd={openExpansion} />
@@ -2198,46 +2529,61 @@ const App = () => {
           )}
         </section>
 
-        {canvas && !isMobilePropsOpen && !cropSession && (
-          <button
-            type="button"
-            onClick={() => selectCanvas(true)}
-            aria-label="Canvas settings"
-            aria-pressed={tool === 'select' && selectedId === CANVAS_ID}
-            className={`absolute left-3 top-3 z-20 flex min-h-11 items-center gap-2 rounded-xl border px-3 text-xs font-extrabold shadow-lg backdrop-blur transition-colors md:hidden ${tool === 'select' && selectedId === CANVAS_ID ? 'border-accent-hover bg-accent text-on-accent' : 'border-border bg-background/95 text-content-strong hover:border-accent-hover hover:text-accent-hover'}`}
-          >
-            <LayoutPanelTop size={17} /> Canvas
-          </button>
-        )}
-
         {canvas && !isMobilePropsOpen && (
-          <div className="pointer-events-none absolute bottom-[calc(4.75rem+env(safe-area-inset-bottom))] right-3 z-20 md:bottom-4 md:right-[21rem]">
-            <CanvasZoomControls
-              zoom={canvasZoom}
-              isFit={isFitZoom}
-              onZoomIn={zoomCanvasIn}
-              onZoomOut={zoomCanvasOut}
-              onFit={fitCanvasToViewport}
-            />
-          </div>
+          <>
+            <output
+              className={`pointer-events-none absolute bottom-[calc(5rem+env(safe-area-inset-bottom))] left-1/2 z-20 -translate-x-1/2 rounded-full bg-background/90 px-3 py-2 text-xs font-extrabold tabular-nums text-content-strong shadow-xl backdrop-blur-md transition-opacity md:hidden ${isZoomHudVisible ? 'opacity-100' : 'opacity-0'}`}
+              aria-label={`Canvas zoom ${Math.round(canvasZoom * 100)} percent`}
+              aria-live="polite"
+            >
+              {Math.round(canvasZoom * 100)}%
+            </output>
+            {!isFitZoom && (
+              <button
+                type="button"
+                onClick={fitCanvasToViewport}
+                className="absolute bottom-[calc(4.75rem+env(safe-area-inset-bottom))] right-3 z-20 flex min-h-11 items-center gap-2 rounded-full border border-border bg-background/90 px-3 text-xs font-extrabold text-content-strong shadow-xl backdrop-blur-md md:hidden"
+                aria-label="Fit canvas to viewport"
+              >
+                <Maximize2 size={17} /> Fit
+              </button>
+            )}
+            <div className="pointer-events-none absolute bottom-4 right-[21rem] z-20 hidden md:block">
+              <CanvasZoomControls
+                zoom={canvasZoom}
+                isFit={isFitZoom}
+                onZoomIn={zoomCanvasIn}
+                onZoomOut={zoomCanvasOut}
+                onFit={fitCanvasToViewport}
+              />
+            </div>
+          </>
         )}
 
         {/* Mobile Overlay */}
         {isMobilePropsOpen && (
           <div
-            className="md:hidden absolute inset-0 bg-overlay/50 z-20"
-            onClick={() => setIsMobilePropsOpen(false)}
+            className="fixed inset-0 z-40 bg-overlay/55 backdrop-blur-[2px] md:hidden"
+            onClick={closeMobileProps}
             aria-hidden="true"
           />
         )}
 
         {/* Properties Panel */}
         <aside
+          ref={mobilePropsDialogRef}
           id="meme-controls"
           aria-labelledby="meme-controls-title"
-          className={`properties-panel absolute md:static top-0 right-0 md:bottom-0 w-[min(20rem,calc(100vw-3.5rem))] md:w-80 border-l border-border bg-background flex flex-col z-30 transition-[transform,visibility] duration-300 ${isMobilePropsOpen ? 'visible translate-x-0 pointer-events-auto' : 'invisible translate-x-full pointer-events-none md:visible md:translate-x-0 md:pointer-events-auto'} order-3`}
+          tabIndex={-1}
+          className={`properties-panel fixed inset-x-0 bottom-0 z-50 order-3 flex max-h-[85dvh] w-full flex-col rounded-t-[1.75rem] border-t border-border bg-background shadow-2xl shadow-overlay/60 transition-[transform,visibility] duration-300 md:static md:max-h-none md:w-80 md:rounded-none md:border-l md:border-t-0 md:shadow-none ${isMobilePropsOpen ? 'visible translate-y-0 pointer-events-auto' : 'invisible translate-y-full pointer-events-none md:visible md:translate-y-0 md:pointer-events-auto'}`}
         >
-          <div className="p-4 border-b border-border flex items-center justify-between gap-2">
+          <div
+            className="flex h-5 shrink-0 items-center justify-center md:hidden"
+            aria-hidden="true"
+          >
+            <span className="h-1 w-9 rounded-full bg-border-emphasis" />
+          </div>
+          <div className="flex items-center justify-between gap-2 border-b border-border px-4 pb-3 pt-1 md:p-4">
             <div className="flex items-center gap-2">
               <Settings2 size={18} className="text-accent" />
               <h2
@@ -2250,13 +2596,21 @@ const App = () => {
             <button
               aria-label="Close meme controls"
               className="md:hidden flex h-11 w-11 items-center justify-center rounded-xl text-content-muted hover:bg-surface hover:text-content-strong"
-              onClick={() => setIsMobilePropsOpen(false)}
+              onClick={closeMobileProps}
             >
               <X size={20} />
             </button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-5">
+            {canvas && (
+              <MobileCanvasZoomSettings
+                zoom={canvasZoom}
+                isFit={isFitZoom}
+                onZoomChange={setManualCanvasZoom}
+                onFit={fitCanvasToViewport}
+              />
+            )}
             {tool === 'draw' ? (
               <div className="space-y-8">
                 <div className="space-y-4">
@@ -2798,6 +3152,129 @@ const App = () => {
         </aside>
       </main>
 
+      {isMobileAddOpen && (
+        <div className="fixed inset-0 z-[60] md:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 h-full w-full bg-overlay/60 backdrop-blur-[2px]"
+            onClick={closeMobileAdd}
+            aria-label="Close add menu"
+            tabIndex={-1}
+          />
+          <div
+            ref={mobileAddDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mobile-add-title"
+            tabIndex={-1}
+            className="mobile-sheet absolute inset-x-0 bottom-0 rounded-t-[1.75rem] border-t border-border bg-background px-4 pb-4 shadow-2xl shadow-overlay/60"
+          >
+            <div className="flex h-6 items-center justify-center" aria-hidden="true">
+              <span className="h-1 w-9 rounded-full bg-border-emphasis" />
+            </div>
+            <div className="flex items-center justify-between pb-3">
+              <div>
+                <h2 id="mobile-add-title" className="text-lg font-black text-content-strong">
+                  Add to your meme
+                </h2>
+                <p className="text-xs text-content-muted">Choose what you want to add.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeMobileAdd}
+                aria-label="Close add menu"
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-content-muted"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="overflow-hidden rounded-2xl bg-surface">
+              <button
+                type="button"
+                data-dialog-initial-focus
+                onClick={() => {
+                  closeMobileAdd();
+                  setIsTemplateLibraryOpen(true);
+                }}
+                className="mobile-sheet-action"
+              >
+                <span className="mobile-sheet-action-icon bg-accent/15 text-accent-hover">
+                  <TemplateLibraryIcon size={21} />
+                </span>
+                <span>
+                  <strong>Browse templates</strong>
+                  <small>Start from a popular meme format</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  closeMobileAdd();
+                  window.requestAnimationFrame(() => {
+                    pendingImagePlacementRef.current = null;
+                    addImageInputRef.current?.click();
+                  });
+                }}
+                className="mobile-sheet-action border-t border-border"
+              >
+                <span className="mobile-sheet-action-icon bg-content-strong text-on-accent">
+                  <ImagePlus size={21} />
+                </span>
+                <span>
+                  <strong>Choose a photo</strong>
+                  <small>Add an image from this device</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  closeMobileAdd();
+                  createBlankCanvas();
+                }}
+                className="mobile-sheet-action border-t border-border"
+              >
+                <span className="mobile-sheet-action-icon bg-background text-content-secondary">
+                  <LayoutPanelTop size={21} />
+                </span>
+                <span>
+                  <strong>New blank canvas</strong>
+                  <small>Replace this project with a clean canvas</small>
+                </span>
+              </button>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {canInstall && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeMobileAdd();
+                    void install();
+                  }}
+                  className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-surface px-3 text-xs font-bold text-content-secondary"
+                >
+                  {installMode === 'ios-instructions' ? (
+                    <Share2 size={17} />
+                  ) : (
+                    <Smartphone size={17} />
+                  )}
+                  {installMode === 'ios-instructions' ? 'Add to Home' : 'Install app'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  closeMobileAdd();
+                  setIsAboutOpen(true);
+                }}
+                className={`flex min-h-11 items-center justify-center gap-2 rounded-xl bg-surface px-3 text-xs font-bold text-content-secondary ${canInstall ? '' : 'col-span-2'}`}
+              >
+                <HelpCircle size={17} /> About MemeSquid
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isTemplateLibraryOpen && (
         <React.Suspense
           fallback={
@@ -2875,7 +3352,14 @@ const App = () => {
                   }}
                   className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 font-extrabold text-on-accent transition-colors hover:bg-accent-hover"
                 >
-                  <Smartphone size={18} /> Install MemeSquid
+                  {installMode === 'ios-instructions' ? (
+                    <Share2 size={18} />
+                  ) : (
+                    <Smartphone size={18} />
+                  )}
+                  {installMode === 'ios-instructions'
+                    ? 'Add MemeSquid to Home Screen'
+                    : 'Install MemeSquid'}
                 </button>
               )}
               <p className="text-content-subtle">
@@ -2922,7 +3406,7 @@ const App = () => {
       )}
 
       {isInstallHelpOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-overlay/80 p-4">
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-overlay/70 backdrop-blur-[2px] md:items-center md:p-4">
           <div
             ref={installHelpDialogRef}
             role="dialog"
@@ -2930,34 +3414,44 @@ const App = () => {
             aria-labelledby="install-help-title"
             aria-describedby="install-help-description"
             tabIndex={-1}
-            className="relative w-full max-w-sm rounded-2xl border border-border bg-background p-6 shadow-xl"
+            className="mobile-sheet relative w-full max-w-sm rounded-t-[1.75rem] border-t border-border bg-background px-5 pb-5 pt-7 shadow-2xl md:rounded-2xl md:border md:p-6"
           >
+            <div
+              className="absolute inset-x-0 top-2 flex justify-center md:hidden"
+              aria-hidden="true"
+            >
+              <span className="h-1 w-9 rounded-full bg-border-emphasis" />
+            </div>
             <button
               type="button"
               onClick={dismissInstallHelp}
               aria-label="Close install instructions"
-              className="absolute right-2 top-2 flex h-11 w-11 items-center justify-center rounded-xl text-content-subtle transition-colors hover:bg-surface hover:text-content-strong"
+              className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-surface text-content-subtle transition-colors hover:text-content-strong md:right-2 md:top-2 md:h-11 md:w-11 md:rounded-xl md:bg-transparent md:hover:bg-surface"
             >
               <X size={20} />
             </button>
-            <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-accent text-on-accent">
-              <Smartphone size={24} />
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-[0.9rem] bg-accent text-on-accent shadow-lg shadow-accent/10 md:mb-5 md:rounded-2xl">
+              {isAppleMobile ? <Share2 size={23} /> : <Smartphone size={24} />}
             </div>
             <h2 id="install-help-title" className="pr-10 text-xl font-black text-content-strong">
-              Install MemeSquid
+              {isAppleMobile ? 'Add to Home Screen' : 'Install MemeSquid'}
             </h2>
             <div id="install-help-description">
               {isAppleMobile ? (
-                <ol className="mt-5 space-y-4 text-sm leading-relaxed text-content-secondary">
-                  <li className="flex gap-3">
-                    <Share2 className="mt-0.5 shrink-0 text-accent" size={19} />
+                <ol className="mt-5 overflow-hidden rounded-2xl bg-surface text-sm leading-relaxed text-content-secondary">
+                  <li className="flex gap-3 p-4">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent-hover">
+                      <Share2 size={18} />
+                    </span>
                     <span>
                       Tap the <strong className="text-content-strong">Share</strong> button in
                       Safari.
                     </span>
                   </li>
-                  <li className="flex gap-3">
-                    <SquarePlus className="mt-0.5 shrink-0 text-accent" size={19} />
+                  <li className="flex gap-3 border-t border-border p-4">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent-hover">
+                      <SquarePlus size={18} />
+                    </span>
                     <span>
                       Choose <strong className="text-content-strong">Add to Home Screen</strong>,
                       then tap Add.
@@ -3047,6 +3541,65 @@ interface CanvasZoomControlsProps {
   onZoomOut: () => void;
   onFit: () => void;
 }
+
+interface MobileCanvasZoomSettingsProps {
+  zoom: number;
+  isFit: boolean;
+  onZoomChange: (zoom: number) => void;
+  onFit: () => void;
+}
+
+const MobileCanvasZoomSettings = memo(
+  ({ zoom, isFit, onZoomChange, onFit }: MobileCanvasZoomSettingsProps) => (
+    <div className="mb-7 space-y-3 rounded-2xl bg-surface p-4 md:hidden">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-xs font-extrabold uppercase tracking-wider text-content-secondary">
+            Canvas zoom
+          </h3>
+          <p className="mt-1 text-[11px] leading-relaxed text-content-subtle">
+            Pinch or move two fingers. Double-tap to toggle zoom.
+          </p>
+        </div>
+        <output
+          htmlFor="mobile-canvas-zoom"
+          className="rounded-lg bg-background px-2.5 py-1.5 text-xs font-extrabold tabular-nums text-content-strong"
+        >
+          {Math.round(zoom * 100)}%
+        </output>
+      </div>
+      <input
+        id="mobile-canvas-zoom"
+        type="range"
+        min={MIN_CANVAS_ZOOM * 100}
+        max={MAX_CANVAS_ZOOM * 100}
+        step="1"
+        value={Math.round(zoom * 100)}
+        onChange={(event) => onZoomChange(Number(event.target.value) / 100)}
+        className="w-full accent-accent"
+        aria-label="Canvas zoom percentage"
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={onFit}
+          aria-pressed={isFit}
+          className={`min-h-11 rounded-xl border px-3 text-xs font-extrabold transition-colors ${isFit ? 'border-accent bg-accent/15 text-accent-hover' : 'border-border bg-background text-content-secondary'}`}
+        >
+          Fit
+        </button>
+        <button
+          type="button"
+          onClick={() => onZoomChange(1)}
+          aria-pressed={Math.abs(zoom - 1) < 0.005}
+          className={`min-h-11 rounded-xl border px-3 text-xs font-extrabold transition-colors ${Math.abs(zoom - 1) < 0.005 ? 'border-accent bg-accent/15 text-accent-hover' : 'border-border bg-background text-content-secondary'}`}
+        >
+          100%
+        </button>
+      </div>
+    </div>
+  ),
+);
 
 const CanvasZoomControls = memo(
   ({ zoom, isFit, onZoomIn, onZoomOut, onFit }: CanvasZoomControlsProps) => {

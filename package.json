@@ -13,7 +13,7 @@
     "template:group:add": "tsx scripts/templates/addGroup.ts",
     "template:image:update": "tsx scripts/templates/updateImage.ts",
     "templates:check": "tsx scripts/templates/check.ts",
-    "templates:test": "tsx --test scripts/templates/*.test.ts src/templateCatalog/*.test.ts",
+    "templates:test": "tsx --test scripts/templates/*.test.ts src/*.test.ts src/templateCatalog/*.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
