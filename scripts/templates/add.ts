@@ -63,7 +63,7 @@ Options:
   -y, --yes               Do not prompt or ask for confirmation
   -h, --help              Show this help
 
-Group kinds are defined when groups are created: series, property, artist`);
+Group kinds are defined when groups are created: property, artist`);
 } else {
   await main().catch(printFailure);
 }

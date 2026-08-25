@@ -1,14 +1,18 @@
 {
   "id": "ol-reliable",
   "title": "Ol' Reliable",
-  "aliases": [],
-  "tags": ["ol-reliable"],
-  "groupIds": [],
+  "aliases": ["La Vieja Confiable"],
+  "tags": ["fallback", "object-labeling", "reaction"],
+  "groupIds": ["spongebob-squarepants"],
   "references": [
     {
       "kind": "imgflip-template",
       "templateId": "139937960",
       "url": "https://imgflip.com/memetemplate/139937960/Ol-Reliable"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/ol-reliable"
     }
   ],
   "image": { "width": 960, "height": 1444 }

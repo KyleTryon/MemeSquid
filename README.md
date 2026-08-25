@@ -7,7 +7,7 @@ The free, local-first meme editor behind [memesquid.com](https://memesquid.com).
 ## Features
 
 - **Flexible Image Import:** Drag and drop, paste from the clipboard, or choose PNG, JPEG, WebP, and SVG files.
-- **Built-in Template Library:** Search and filter the curated local catalog by title, tag, series, property, or artist.
+- **Built-in Template Library:** Search and filter the curated local catalog by title, tag, franchise, or artist.
 - **Layered Editing:** Combine multiple images, reorder layers, draw freehand, and undo or redo edits.
 - **Local Background Removal:** Remove or restore the background on the main image or any additional image. Inference runs locally in a browser worker; images are not uploaded to a removal service.
 - **Quick Image Controls:** Flip imported images horizontally or vertically from the canvas controls.
@@ -75,8 +75,8 @@ pnpm template:add --imgflip "https://imgflip.com/memetemplate/516512053/Flork"
 Use `--image` together with `--imgflip` to supply a downloaded local image while retaining the
 Imgflip reference. Imgflip imports always require confirmation unless `--yes` is passed.
 
-Templates can share reusable series, property, or artist groups. Add a group before assigning
-templates to it:
+Templates can share reusable property or artist groups. Property groups represent the franchise
+or intellectual property that a template comes from. Add a group before assigning templates to it:
 
 ```bash
 pnpm template:group:add

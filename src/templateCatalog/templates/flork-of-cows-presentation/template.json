@@ -1,9 +1,9 @@
 {
   "id": "flork-of-cows-presentation",
   "title": "Flork of Cows Presentation",
-  "aliases": ["presentation"],
-  "tags": ["cows", "flork", "presentation"],
-  "groupIds": ["flork", "flork-of-cows"],
+  "aliases": [],
+  "tags": ["announcement", "explainer"],
+  "groupIds": ["flork"],
   "references": [
     {
       "kind": "imgflip-template",

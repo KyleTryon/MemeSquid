@@ -1,14 +1,18 @@
 {
   "id": "stop-hes-already-dead",
-  "title": "Stop He's Already Dead",
+  "title": "Stop! Stop! He's Already Dead!",
   "aliases": ["Simpsons Stop He's Dead", "Stop He's Dead"],
-  "tags": ["dead", "simpsons", "stop"],
-  "groupIds": ["simpsons", "the-simpsons"],
+  "tags": ["defeat", "excessive", "reaction"],
+  "groupIds": ["the-simpsons"],
   "references": [
     {
       "kind": "imgflip-template",
       "templateId": "298218630",
       "url": "https://imgflip.com/memetemplate/298218630/Stop-Hes-Already-Dead"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/stop-stop-hes-already-dead"
     }
   ],
   "image": { "width": 600, "height": 769 }

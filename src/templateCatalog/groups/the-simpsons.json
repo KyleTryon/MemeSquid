@@ -3,5 +3,10 @@
   "kind": "property",
   "name": "The Simpsons",
   "aliases": [],
-  "references": []
+  "references": [
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/subcultures/the-simpsons"
+    }
+  ]
 }

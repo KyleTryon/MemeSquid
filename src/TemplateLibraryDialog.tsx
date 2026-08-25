@@ -14,9 +14,12 @@ interface TemplateLibraryDialogProps {
 
 const GROUP_KIND_LABELS = {
   artist: 'Artists',
-  property: 'Properties',
-  series: 'Series',
+  property: 'Franchises',
 } as const;
+
+const AVAILABLE_GROUP_KINDS = templateGroupKinds.filter((kind) =>
+  templateCatalog.groups.some((group) => group.kind === kind),
+);
 
 export default function TemplateLibraryDialog({
   isOpen,
@@ -98,7 +101,7 @@ export default function TemplateLibraryDialog({
               className="h-11 w-full rounded-xl border border-border bg-canvas px-3 text-sm font-bold text-content-strong"
             >
               <option value="">All groups</option>
-              {templateGroupKinds.map((kind) => (
+              {AVAILABLE_GROUP_KINDS.map((kind) => (
                 <optgroup key={kind} label={GROUP_KIND_LABELS[kind]}>
                   {templateCatalog.groups
                     .filter((group) => group.kind === kind)

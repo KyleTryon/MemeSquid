@@ -1,1 +1,12 @@
-{ "id": "pokemon", "kind": "property", "name": "Pokémon", "aliases": [], "references": [] }
+{
+  "id": "pokemon",
+  "kind": "property",
+  "name": "Pokémon",
+  "aliases": [],
+  "references": [
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/subcultures/pokemon"
+    }
+  ]
+}

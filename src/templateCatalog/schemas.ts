@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const templateGroupKinds = ['series', 'property', 'artist'] as const;
+export const templateGroupKinds = ['property', 'artist'] as const;
 
 const slugSchema = z
   .string()

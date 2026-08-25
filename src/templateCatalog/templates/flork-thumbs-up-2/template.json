@@ -1,9 +1,9 @@
 {
   "id": "flork-thumbs-up-2",
-  "title": "Flork Thumbs Up 2",
-  "aliases": ["thumbs up"],
-  "tags": ["flork", "thumbs-up"],
-  "groupIds": ["flork", "flork-of-cows"],
+  "title": "Flork Thumbs Up",
+  "aliases": [],
+  "tags": ["approval", "reaction"],
+  "groupIds": ["flork"],
   "references": [
     {
       "kind": "imgflip-template",

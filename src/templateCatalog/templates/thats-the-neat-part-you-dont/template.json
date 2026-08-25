@@ -2,27 +2,26 @@
   "id": "thats-the-neat-part-you-dont",
   "title": "That's the neat part, you don't",
   "aliases": [
-    "invincible",
-    "invincible neat part",
     "mark",
     "nolan",
     "omni man",
     "omniman",
     "that’s the fun part",
-    "that’s the neat part",
-    "that's the neat part you don't",
     "that's the neat thing you don't",
     "thats the best part",
-    "when do i",
-    "you dont"
+    "when do i"
   ],
-  "tags": ["invincible", "mark", "neat-part", "nolan", "omni-man"],
-  "groupIds": ["invincible", "thats-the-neat-part-you-dont"],
+  "tags": ["impossibility", "object-labeling", "refusal"],
+  "groupIds": ["invincible"],
   "references": [
     {
       "kind": "imgflip-template",
       "templateId": "326899798",
       "url": "https://imgflip.com/memetemplate/326899798/Thats-the-neat-part-you-dont"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/thats-the-neat-part-you-dont"
     }
   ],
   "image": { "width": 942, "height": 1024 }

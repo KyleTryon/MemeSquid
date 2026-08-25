@@ -1,9 +1,9 @@
 {
   "id": "simpsons-grandpa-with-kids",
-  "title": "Simpsons grandpa with kids",
-  "aliases": [],
-  "tags": ["grandpa", "simpsons"],
-  "groupIds": ["simpsons"],
+  "title": "Abe Simpson Talking to Kids",
+  "aliases": ["Grandpa Simpson Talking to Kids", "Simpsons grandpa with kids"],
+  "tags": ["generation-gap", "lecture", "storytelling"],
+  "groupIds": ["the-simpsons"],
   "references": [
     {
       "kind": "imgflip-template",

@@ -1,14 +1,18 @@
 {
   "id": "homer-simpsons-back-fat",
   "title": "Homer Simpson's Back Fat",
-  "aliases": ["Back", "Fat", "Homer", "homer back fat", "Simpson", "Simpsons"],
-  "tags": ["back-fat", "homer", "simpsons"],
-  "groupIds": ["homers-back-fat", "the-simpsons"],
+  "aliases": [],
+  "tags": ["comparison", "expectation-vs-reality", "hidden-flaw"],
+  "groupIds": ["the-simpsons"],
   "references": [
     {
       "kind": "imgflip-template",
       "templateId": "157043617",
       "url": "https://imgflip.com/memetemplate/157043617/Homer-Simpsons-Back-Fat"
+    },
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/homer-simpsons-back-fat"
     }
   ],
   "image": { "width": 680, "height": 765 }

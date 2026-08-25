@@ -35,7 +35,7 @@ if (values.help) {
 
 Options:
   -n, --name <name>       Display name (required without an interactive terminal)
-      --kind <kind>       Group kind: series, property, or artist
+      --kind <kind>       Group kind: property or artist
       --id <slug>         Stable ID; defaults to a slug of the name
       --alias <name>      Search alias; repeatable
       --kym <url>         Optional Know Your Meme reference
@@ -112,8 +112,8 @@ async function promptKind(): Promise<TemplateGroupKind> {
 
 function parseGroupKind(value: string): TemplateGroupKind {
   const kind = value.trim();
-  if (kind === 'series' || kind === 'property' || kind === 'artist') return kind;
-  throw new Error('--kind must be series, property, or artist.');
+  if (kind === 'property' || kind === 'artist') return kind;
+  throw new Error('--kind must be property or artist.');
 }
 
 function capitalize(value: string): string {

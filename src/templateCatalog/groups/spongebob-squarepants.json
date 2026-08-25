@@ -3,5 +3,10 @@
   "kind": "property",
   "name": "SpongeBob SquarePants",
   "aliases": [],
-  "references": []
+  "references": [
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/subcultures/spongebob-squarepants"
+    }
+  ]
 }

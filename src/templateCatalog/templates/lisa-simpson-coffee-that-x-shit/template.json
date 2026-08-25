@@ -1,9 +1,9 @@
 {
   "id": "lisa-simpson-coffee-that-x-shit",
-  "title": "Lisa Simpson Coffee That X Shit",
+  "title": "Lisa Simpson Pouring Coffee",
   "aliases": ["lisa drinks coffee"],
-  "tags": ["coffee", "lisa", "simpsons"],
-  "groupIds": ["simpsons", "the-simpsons"],
+  "tags": ["caffeine", "reaction"],
+  "groupIds": ["the-simpsons"],
   "references": [
     {
       "kind": "imgflip-template",

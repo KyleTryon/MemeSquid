@@ -79,15 +79,15 @@ void test('group and template additions are validated, processed, and transactio
       .toFile(inputPath);
 
     const group = await addGroup(projectRoot, {
-      id: 'example-series',
-      kind: 'series',
-      name: 'Example Series',
+      id: 'example-property',
+      kind: 'property',
+      name: 'Example Property',
       aliases: ['Example'],
       references: createReferences({
-        knowYourMemeUrl: 'https://knowyourmeme.com/memes/example-series',
+        knowYourMemeUrl: 'https://knowyourmeme.com/memes/example-property',
       }),
     });
-    assert.equal(group.kind, 'series');
+    assert.equal(group.kind, 'property');
 
     const imgflipReference = createReferences({ imgflipTemplate: '516512053' });
     const result = await addTemplate(projectRoot, inputPath, {
@@ -95,7 +95,7 @@ void test('group and template additions are validated, processed, and transactio
       title: 'Example Template',
       aliases: ['The Example'],
       tags: ['Image Macro', 'example'],
-      groupIds: ['example-series'],
+      groupIds: ['example-property'],
       references: imgflipReference,
     });
 
@@ -111,7 +111,7 @@ void test('group and template additions are validated, processed, and transactio
     assert.deepEqual(await checkCatalog(projectRoot), []);
 
     const metadata = await readFile(path.join(result.destination, 'template.json'), 'utf8');
-    assert.match(metadata, /"groupIds": \["example-series"\]/u);
+    assert.match(metadata, /"groupIds": \["example-property"\]/u);
     assert.match(metadata, /"templateId": "516512053"/u);
 
     await assert.rejects(

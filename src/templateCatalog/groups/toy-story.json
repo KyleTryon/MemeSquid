@@ -1,1 +1,12 @@
-{ "id": "toy-story", "kind": "property", "name": "Toy Story", "aliases": [], "references": [] }
+{
+  "id": "toy-story",
+  "kind": "property",
+  "name": "Toy Story",
+  "aliases": [],
+  "references": [
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/subcultures/toy-story"
+    }
+  ]
+}

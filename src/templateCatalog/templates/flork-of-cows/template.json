@@ -2,8 +2,8 @@
   "id": "flork-of-cows",
   "title": "Flork of Cows",
   "aliases": [],
-  "tags": ["cows", "flork"],
-  "groupIds": ["flork", "flork-of-cows"],
+  "tags": ["confrontation", "group", "reaction"],
+  "groupIds": ["flork"],
   "references": [
     {
       "kind": "imgflip-template",

@@ -1,1 +1,12 @@
-{ "id": "invincible", "kind": "property", "name": "Invincible", "aliases": [], "references": [] }
+{
+  "id": "invincible",
+  "kind": "property",
+  "name": "Invincible",
+  "aliases": [],
+  "references": [
+    {
+      "kind": "know-your-meme",
+      "url": "https://knowyourmeme.com/memes/subcultures/invincible"
+    }
+  ]
+}
