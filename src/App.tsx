@@ -1019,6 +1019,7 @@ const App = () => {
                 originalSrc: originalUrl,
               }),
             );
+            setAnnouncement('Background removed. Your transparent PNG is ready to download.');
           })
           .catch((error) => {
             console.error('Failed to apply background mask', error);
@@ -2007,8 +2008,34 @@ const App = () => {
     [canvas],
   );
 
+  const exportBackgroundRemovedPng = useCallback(() => {
+    setSelectedId(null);
+    setIsExportMenuOpen(false);
+
+    window.setTimeout(() => {
+      const stage = stageRef.current;
+      if (!stage) return;
+
+      const link = document.createElement('a');
+      link.download = `background-removed-${new Date().toISOString().slice(0, 10)}.png`;
+      link.href = stage.toDataURL({ mimeType: 'image/png', pixelRatio: 1 });
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setAnnouncement('Transparent PNG download started.');
+    }, 100);
+  }, []);
+
   const selectedText = texts.find((t) => t.id === selectedId);
   const selectedImage = images.find((i) => i.id === selectedId);
+  const isSimpleBackgroundRemovalProject = Boolean(
+    canvas &&
+    canvas.fill.type === 'transparent' &&
+    images.length === 1 &&
+    texts.length === 0 &&
+    lines.length === 0,
+  );
+  const simpleBackgroundRemovalImage = isSimpleBackgroundRemovalProject ? images[0] : null;
   const isCanvasScrollable = Boolean(canvas && canvasZoom > fitZoom + 0.001);
 
   const allElements = [
@@ -2083,6 +2110,61 @@ const App = () => {
               <Redo2 size={18} className="w-4 h-4 md:w-[18px] md:h-[18px]" />
             </button>
           </div>
+          {simpleBackgroundRemovalImage && (
+            <button
+              type="button"
+              onClick={() => {
+                if (simpleBackgroundRemovalImage.bgRemoved) {
+                  exportBackgroundRemovedPng();
+                } else {
+                  requestBackgroundRemoval(simpleBackgroundRemovalImage.id);
+                }
+              }}
+              disabled={
+                Boolean(cropSession) ||
+                (!simpleBackgroundRemovalImage.bgRemoved &&
+                  (bgRemovalState.status === 'downloading' ||
+                    bgRemovalState.status === 'processing'))
+              }
+              aria-label={
+                simpleBackgroundRemovalImage.bgRemoved
+                  ? 'Download background-removed image as transparent PNG'
+                  : bgRemovalState.status === 'downloading'
+                    ? `Downloading background removal model, ${bgRemovalState.progress} percent`
+                    : bgRemovalState.status === 'processing'
+                      ? 'Removing image background'
+                      : 'Remove background from image'
+              }
+              aria-busy={
+                bgRemovalState.status === 'downloading' || bgRemovalState.status === 'processing'
+              }
+              className="flex h-11 min-w-11 items-center justify-center gap-2 rounded-xl bg-surface px-3 text-xs font-extrabold text-content-strong transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50 md:px-4 md:text-sm"
+              title={
+                simpleBackgroundRemovalImage.bgRemoved
+                  ? 'Download transparent PNG'
+                  : 'Remove background'
+              }
+            >
+              {bgRemovalState.status === 'downloading' ? (
+                <Loader2 size={17} className="animate-spin text-accent" />
+              ) : bgRemovalState.status === 'processing' ? (
+                <Loader2 size={17} className="animate-spin text-accent" />
+              ) : simpleBackgroundRemovalImage.bgRemoved ? (
+                <Download size={17} className="text-accent" />
+              ) : (
+                <Wand2 size={17} className="text-accent" />
+              )}
+              <span className="hidden sm:inline">
+                {bgRemovalState.status === 'downloading'
+                  ? `Downloading ${bgRemovalState.progress}%`
+                  : bgRemovalState.status === 'processing'
+                    ? 'Removing…'
+                    : simpleBackgroundRemovalImage.bgRemoved
+                      ? 'Download PNG'
+                      : 'Remove BG'}
+              </span>
+            </button>
+          )}
           <div className="relative z-50">
             <div className="flex items-stretch h-11">
               <button
