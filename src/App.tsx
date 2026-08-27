@@ -2008,34 +2008,36 @@ const App = () => {
     [canvas],
   );
 
-  const exportBackgroundRemovedPng = useCallback(() => {
-    setSelectedId(null);
-    setIsExportMenuOpen(false);
+  const exportBackgroundRemovedPng = useCallback((image: ImageElement) => {
+    const width = image.image.width;
+    const height = image.image.height;
+    if (width === 0 || height === 0) {
+      setAnnouncement('The background-removed image is not ready to download.');
+      return;
+    }
 
-    window.setTimeout(() => {
-      const stage = stageRef.current;
-      if (!stage) return;
+    const imageCanvas = document.createElement('canvas');
+    imageCanvas.width = width;
+    imageCanvas.height = height;
+    const context = imageCanvas.getContext('2d');
+    if (!context) {
+      setAnnouncement('The transparent PNG could not be created.');
+      return;
+    }
 
-      const link = document.createElement('a');
-      link.download = `background-removed-${new Date().toISOString().slice(0, 10)}.png`;
-      link.href = stage.toDataURL({ mimeType: 'image/png', pixelRatio: 1 });
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setAnnouncement('Transparent PNG download started.');
-    }, 100);
+    context.drawImage(image.image, 0, 0);
+    const link = document.createElement('a');
+    link.download = `background-removed-${new Date().toISOString().slice(0, 10)}.png`;
+    link.href = imageCanvas.toDataURL('image/png');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setAnnouncement('Transparent PNG download started.');
   }, []);
 
   const selectedText = texts.find((t) => t.id === selectedId);
   const selectedImage = images.find((i) => i.id === selectedId);
-  const isSimpleBackgroundRemovalProject = Boolean(
-    canvas &&
-    canvas.fill.type === 'transparent' &&
-    images.length === 1 &&
-    texts.length === 0 &&
-    lines.length === 0,
-  );
-  const simpleBackgroundRemovalImage = isSimpleBackgroundRemovalProject ? images[0] : null;
+  const firstImageLayer = images[0] ?? null;
   const isCanvasScrollable = Boolean(canvas && canvasZoom > fitZoom + 0.001);
 
   const allElements = [
@@ -2110,46 +2112,46 @@ const App = () => {
               <Redo2 size={18} className="w-4 h-4 md:w-[18px] md:h-[18px]" />
             </button>
           </div>
-          {simpleBackgroundRemovalImage && (
+          {firstImageLayer && (
             <button
               type="button"
               onClick={() => {
-                if (simpleBackgroundRemovalImage.bgRemoved) {
-                  exportBackgroundRemovedPng();
+                if (firstImageLayer.bgRemoved) {
+                  exportBackgroundRemovedPng(firstImageLayer);
                 } else {
-                  requestBackgroundRemoval(simpleBackgroundRemovalImage.id);
+                  requestBackgroundRemoval(firstImageLayer.id);
                 }
               }}
               disabled={
                 Boolean(cropSession) ||
-                (!simpleBackgroundRemovalImage.bgRemoved &&
+                (!firstImageLayer.bgRemoved &&
                   (bgRemovalState.status === 'downloading' ||
                     bgRemovalState.status === 'processing'))
               }
               aria-label={
-                simpleBackgroundRemovalImage.bgRemoved
-                  ? 'Download background-removed image as transparent PNG'
+                firstImageLayer.bgRemoved
+                  ? 'Download the first image layer as a transparent PNG'
                   : bgRemovalState.status === 'downloading'
                     ? `Downloading background removal model, ${bgRemovalState.progress} percent`
                     : bgRemovalState.status === 'processing'
                       ? 'Removing image background'
-                      : 'Remove background from image'
+                      : 'Remove background from the first image layer'
               }
               aria-busy={
                 bgRemovalState.status === 'downloading' || bgRemovalState.status === 'processing'
               }
               className="flex h-11 min-w-11 items-center justify-center gap-2 rounded-xl bg-surface px-3 text-xs font-extrabold text-content-strong transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50 md:px-4 md:text-sm"
               title={
-                simpleBackgroundRemovalImage.bgRemoved
+                firstImageLayer.bgRemoved
                   ? 'Download transparent PNG'
-                  : 'Remove background'
+                  : 'Remove background from first image'
               }
             >
               {bgRemovalState.status === 'downloading' ? (
                 <Loader2 size={17} className="animate-spin text-accent" />
               ) : bgRemovalState.status === 'processing' ? (
                 <Loader2 size={17} className="animate-spin text-accent" />
-              ) : simpleBackgroundRemovalImage.bgRemoved ? (
+              ) : firstImageLayer.bgRemoved ? (
                 <Download size={17} className="text-accent" />
               ) : (
                 <Wand2 size={17} className="text-accent" />
@@ -2159,7 +2161,7 @@ const App = () => {
                   ? `Downloading ${bgRemovalState.progress}%`
                   : bgRemovalState.status === 'processing'
                     ? 'Removing…'
-                    : simpleBackgroundRemovalImage.bgRemoved
+                    : firstImageLayer.bgRemoved
                       ? 'Download PNG'
                       : 'Remove BG'}
               </span>
