@@ -9,7 +9,7 @@ export interface TextElement {
   stroke: string;
   strokeWidth: number;
   fontFamily: string;
-  fontWeight: string;
+  fontWeight: 'normal' | 'bold';
   align: string;
   width?: number;
   rotation?: number;

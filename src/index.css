@@ -43,6 +43,11 @@ body {
   background: var(--color-canvas);
 }
 
+.canvas-gesture-surface {
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
 .canvas-transparency-grid {
   background-color: var(--color-checker-light);
   background-image:
@@ -267,6 +272,45 @@ button:disabled {
 }
 
 @media (max-width: 767px) {
+  .mobile-sheet-overlay {
+    visibility: hidden;
+    pointer-events: none;
+    transition: visibility 0ms linear 260ms;
+  }
+
+  .mobile-sheet-overlay[data-sheet-open='true'] {
+    visibility: visible;
+    pointer-events: auto;
+    transition: visibility 0ms;
+  }
+
+  .mobile-bottom-sheet {
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(calc(100% + var(--sheet-drag-offset, 0px)));
+    transition:
+      transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+      visibility 0ms linear 260ms;
+    will-change: transform;
+  }
+
+  .mobile-bottom-sheet[data-sheet-open='true'] {
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(var(--sheet-drag-offset, 0px));
+    transition:
+      transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+      visibility 0ms;
+  }
+
+  .mobile-bottom-sheet[data-sheet-dragging='true'] {
+    transition: none;
+  }
+
+  .mobile-sheet-backdrop {
+    transition: opacity 200ms ease;
+  }
+
   .safe-header {
     padding-top: max(0.375rem, env(safe-area-inset-top));
     padding-right: max(0.75rem, env(safe-area-inset-right));

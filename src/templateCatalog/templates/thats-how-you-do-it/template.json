@@ -1,0 +1,15 @@
+{
+  "id": "thats-how-you-do-it",
+  "title": "That's how you do it",
+  "aliases": [],
+  "tags": [],
+  "groupIds": [],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "321927696",
+      "url": "https://imgflip.com/memetemplate/321927696/Thats-how-you-do-it"
+    }
+  ],
+  "image": { "width": 1080, "height": 792 }
+}

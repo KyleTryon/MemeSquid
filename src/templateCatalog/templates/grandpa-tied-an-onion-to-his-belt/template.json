@@ -1,0 +1,15 @@
+{
+  "id": "grandpa-tied-an-onion-to-his-belt",
+  "title": "Grandpa Tied an Onion to His Belt",
+  "aliases": ["Abe Simpson onion belt", "Which was the style at the time"],
+  "tags": ["nostalgia", "old-fashioned", "storytelling"],
+  "groupIds": ["the-simpsons"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "268123913",
+      "url": "https://imgflip.com/memetemplate/268123913/Grandpa-tied-an-onion-to-his-belt"
+    }
+  ],
+  "image": { "width": 640, "height": 480 }
+}
