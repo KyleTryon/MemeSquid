@@ -10,6 +10,7 @@ export interface TextElement {
   strokeWidth: number;
   fontFamily: string;
   fontWeight: 'normal' | 'bold';
+  allCaps: boolean;
   align: string;
   width?: number;
   rotation?: number;

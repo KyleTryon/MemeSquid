@@ -50,6 +50,7 @@ import {
   Crop as CropIcon,
   Images as TemplateLibraryIcon,
   Bold,
+  CaseUpper,
   Minus,
   Layers3,
 } from 'lucide-react';
@@ -460,6 +461,7 @@ const createTextElement = (
       | 'strokeWidth'
       | 'fontFamily'
       | 'fontWeight'
+      | 'allCaps'
       | 'align'
       | 'shadowColor'
       | 'shadowBlur'
@@ -481,6 +483,7 @@ const createTextElement = (
   strokeWidth: 2,
   fontFamily: 'Impact, sans-serif',
   fontWeight: 'bold',
+  allCaps: true,
   align: 'center',
   rotation: 0,
   shadowColor: '#000000',
@@ -501,6 +504,7 @@ const getTextStyle = (
   | 'strokeWidth'
   | 'fontFamily'
   | 'fontWeight'
+  | 'allCaps'
   | 'align'
   | 'shadowColor'
   | 'shadowBlur'
@@ -513,6 +517,7 @@ const getTextStyle = (
   strokeWidth: text.strokeWidth,
   fontFamily: text.fontFamily,
   fontWeight: text.fontWeight,
+  allCaps: text.allCaps,
   align: text.align,
   shadowColor: text.shadowColor,
   shadowBlur: text.shadowBlur,
@@ -3350,20 +3355,32 @@ const App = () => {
                     </div>
                     <div className="space-y-1.5 col-span-2">
                       <span className="text-[10px] font-medium text-content-subtle uppercase">
-                        Weight
+                        Style
                       </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateText(selectedText.id, {
-                            fontWeight: selectedText.fontWeight === 'bold' ? 'normal' : 'bold',
-                          })
-                        }
-                        aria-pressed={selectedText.fontWeight === 'bold'}
-                        className={`flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border p-2 text-sm font-bold transition-colors ${selectedText.fontWeight === 'bold' ? 'border-accent bg-accent/15 text-accent-hover' : 'border-border bg-canvas/50 text-content-secondary hover:border-border-emphasis'}`}
-                      >
-                        <Bold size={16} /> Bold
-                      </button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateText(selectedText.id, {
+                              fontWeight: selectedText.fontWeight === 'bold' ? 'normal' : 'bold',
+                            })
+                          }
+                          aria-pressed={selectedText.fontWeight === 'bold'}
+                          className={`flex min-h-11 items-center justify-center gap-2 rounded-xl border p-2 text-sm font-bold transition-colors ${selectedText.fontWeight === 'bold' ? 'border-accent bg-accent/15 text-accent-hover' : 'border-border bg-canvas/50 text-content-secondary hover:border-border-emphasis'}`}
+                        >
+                          <Bold size={16} /> Bold
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateText(selectedText.id, { allCaps: !selectedText.allCaps })
+                          }
+                          aria-pressed={selectedText.allCaps}
+                          className={`flex min-h-11 items-center justify-center gap-2 rounded-xl border p-2 text-sm font-bold transition-colors ${selectedText.allCaps ? 'border-accent bg-accent/15 text-accent-hover' : 'border-border bg-canvas/50 text-content-secondary hover:border-border-emphasis'}`}
+                        >
+                          <CaseUpper size={16} /> All caps
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -5002,6 +5019,8 @@ const TextElementItem = memo(
         <Text
           ref={shapeRef}
           {...data}
+          text={data.allCaps ? data.text.toUpperCase() : data.text}
+          fontStyle={data.fontWeight}
           fillAfterStrokeEnabled
           draggable={tool === 'select' && isSelected}
           listening={tool === 'select'}
