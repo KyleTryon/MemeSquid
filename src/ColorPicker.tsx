@@ -103,7 +103,7 @@ export const ColorPicker = ({
       className={`flex min-h-11 min-w-0 items-center gap-1.5 rounded-xl border border-border bg-canvas/50 p-1 transition-colors focus-within:border-accent-hover hover:border-border-emphasis ${className}`}
     >
       <label
-        className="group relative h-9 w-9 shrink-0 overflow-hidden rounded-lg canvas-transparency-grid shadow-[inset_0_0_0_1px_rgb(255_255_255/0.16)]"
+        className="group relative h-11 w-11 shrink-0 overflow-hidden rounded-lg canvas-transparency-grid shadow-[inset_0_0_0_1px_rgb(255_255_255/0.16)]"
         title={`Open ${ariaLabel.toLowerCase()} picker`}
       >
         <span
@@ -143,7 +143,7 @@ export const ColorPicker = ({
             event.currentTarget.blur();
           }
         }}
-        className="color-picker-value h-9 min-w-0 flex-1 border-0 bg-transparent px-1 font-mono text-xs uppercase text-content-secondary outline-none"
+        className="color-picker-value h-11 min-w-0 flex-1 border-0 bg-transparent px-1 font-mono text-xs uppercase text-content-secondary outline-none"
         aria-label={`${ariaLabel} hex value`}
         autoCapitalize="characters"
         autoComplete="off"
@@ -155,7 +155,7 @@ export const ColorPicker = ({
           type="button"
           onClick={() => void pickScreenColor()}
           disabled={isPicking}
-          className="color-picker-button flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-content-muted transition-colors hover:bg-surface hover:text-accent-hover disabled:opacity-60"
+          className="color-picker-button flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-content-muted transition-colors hover:bg-surface hover:text-accent-hover disabled:opacity-60"
           aria-label={`Pick ${ariaLabel.toLowerCase()} from screen`}
           title="Pick a color from anywhere on screen"
         >

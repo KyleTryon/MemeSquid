@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useEffectEvent, useRef } from 'react';
 
 const DIALOG_FOCUSABLE_SELECTOR = [
   'a[href]',
+  'summary',
   'button:not([disabled])',
   'input:not([disabled])',
   'select:not([disabled])',
@@ -15,6 +16,7 @@ export function useDialogFocus<T extends HTMLElement = HTMLDivElement>(
   trapFocus: boolean = true,
 ) {
   const dialogRef = useRef<T | null>(null);
+  const dismiss = useEffectEvent(onDismiss);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -22,12 +24,18 @@ export function useDialogFocus<T extends HTMLElement = HTMLDivElement>(
     const dialog = dialogRef.current;
     if (!dialog) return;
 
+    const getVisibleControls = () =>
+      Array.from(dialog.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE_SELECTOR)).filter(
+        (element) => element.getClientRects().length > 0,
+      );
+
     const previouslyFocused =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusDialog = window.requestAnimationFrame(() => {
+      const visibleControls = getVisibleControls();
       const initialFocus =
-        dialog.querySelector<HTMLElement>('[data-dialog-initial-focus]') ??
-        dialog.querySelector<HTMLElement>(DIALOG_FOCUSABLE_SELECTOR) ??
+        visibleControls.find((element) => element.hasAttribute('data-dialog-initial-focus')) ??
+        visibleControls[0] ??
         dialog;
       initialFocus.focus();
     });
@@ -36,15 +44,13 @@ export function useDialogFocus<T extends HTMLElement = HTMLDivElement>(
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
-        onDismiss();
+        dismiss();
         return;
       }
 
       if (!trapFocus || event.key !== 'Tab') return;
 
-      const focusableElements = Array.from(
-        dialog.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE_SELECTOR),
-      ).filter((element) => element.getClientRects().length > 0);
+      const focusableElements = getVisibleControls();
 
       if (focusableElements.length === 0) {
         event.preventDefault();
@@ -54,10 +60,16 @@ export function useDialogFocus<T extends HTMLElement = HTMLDivElement>(
 
       const firstElement = focusableElements[0];
       const lastElement = focusableElements[focusableElements.length - 1];
-      if (event.shiftKey && document.activeElement === firstElement) {
+      const focusIsOutsideControls = !focusableElements.some(
+        (element) => element === document.activeElement,
+      );
+      if (event.shiftKey && (document.activeElement === firstElement || focusIsOutsideControls)) {
         event.preventDefault();
         lastElement.focus();
-      } else if (!event.shiftKey && document.activeElement === lastElement) {
+      } else if (
+        !event.shiftKey &&
+        (document.activeElement === lastElement || focusIsOutsideControls)
+      ) {
         event.preventDefault();
         firstElement.focus();
       }
@@ -69,7 +81,7 @@ export function useDialogFocus<T extends HTMLElement = HTMLDivElement>(
       document.removeEventListener('keydown', handleKeyDown, true);
       if (previouslyFocused && document.contains(previouslyFocused)) previouslyFocused.focus();
     };
-  }, [isOpen, onDismiss, trapFocus]);
+  }, [isOpen, trapFocus]);
 
   return dialogRef;
 }

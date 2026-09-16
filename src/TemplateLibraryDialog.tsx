@@ -1,5 +1,5 @@
 import { ExternalLink, Images, Loader2, Search, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { templateCatalog, type CatalogTemplate } from './templateCatalog/catalog';
 import { getTemplateGroups, searchTemplateCatalog } from './templateCatalog/search';
 import { templateGroupKinds, type CatalogReference } from './templateCatalog/schemas';
@@ -8,6 +8,7 @@ import { useDialogFocus } from './useDialogFocus';
 interface TemplateLibraryDialogProps {
   isOpen: boolean;
   loadingTemplateId: string | null;
+  feedback: ReactNode;
   onClose: () => void;
   onSelect: (template: CatalogTemplate) => void;
 }
@@ -24,12 +25,17 @@ const AVAILABLE_GROUP_KINDS = templateGroupKinds.filter((kind) =>
 export default function TemplateLibraryDialog({
   isOpen,
   loadingTemplateId,
+  feedback,
   onClose,
   onSelect,
 }: TemplateLibraryDialogProps) {
   const [query, setQuery] = useState('');
   const [groupId, setGroupId] = useState<string | null>(null);
   const dialogRef = useDialogFocus(isOpen, onClose);
+  const clearFilters = () => {
+    setQuery('');
+    setGroupId(null);
+  };
 
   const templates = useMemo(
     () => searchTemplateCatalog(templateCatalog, { groupId, query }),
@@ -71,7 +77,7 @@ export default function TemplateLibraryDialog({
             onClick={onClose}
             disabled={Boolean(loadingTemplateId)}
             aria-label="Close template library"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-content-muted transition-colors hover:bg-surface hover:text-content-strong disabled:opacity-40"
+            className="dialog-close-button"
           >
             <X size={20} />
           </button>
@@ -116,10 +122,28 @@ export default function TemplateLibraryDialog({
           </label>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-6">
-          <p className="mb-4 text-xs font-bold uppercase tracking-[0.14em] text-content-subtle">
-            {templates.length} {templates.length === 1 ? 'template' : 'templates'}
-          </p>
+        <div className="shrink-0 px-4 md:px-6">{feedback}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-6 md:py-6">
+          <div className="mb-4 flex min-h-11 items-center justify-between gap-3">
+            <p
+              role="status"
+              aria-atomic="true"
+              className="text-xs font-semibold text-content-muted"
+            >
+              {loadingTemplateId
+                ? 'Loading template…'
+                : `${templates.length} ${templates.length === 1 ? 'template' : 'templates'}`}
+            </p>
+            {(query || groupId) && templates.length > 0 && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="min-h-11 rounded-xl px-3 text-xs font-bold text-accent-hover transition-colors hover:bg-surface"
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
           {templates.length ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
               {templates.map((template) => (
@@ -141,10 +165,7 @@ export default function TemplateLibraryDialog({
               </p>
               <button
                 type="button"
-                onClick={() => {
-                  setQuery('');
-                  setGroupId(null);
-                }}
+                onClick={clearFilters}
                 className="mt-4 min-h-11 rounded-xl border border-border bg-surface px-4 text-sm font-bold text-content-strong hover:border-accent hover:text-accent-hover"
               >
                 Clear filters
@@ -169,12 +190,13 @@ function TemplateCard({ isDisabled, isLoading, onSelect, template }: TemplateCar
   const source = getPreferredSource(template.references);
 
   return (
-    <article className="overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-border-emphasis">
+    <article className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-border-emphasis focus-within:border-accent-hover">
       <button
         type="button"
         onClick={() => onSelect(template)}
         disabled={isDisabled}
-        className="block w-full text-left disabled:cursor-wait disabled:opacity-60"
+        className="flex w-full flex-1 flex-col text-left disabled:cursor-wait disabled:opacity-60"
+        aria-busy={isLoading}
         aria-label={`Start a new meme with ${template.title}`}
       >
         <span className="relative flex aspect-square w-full items-center justify-center overflow-hidden bg-canvas p-2">
@@ -217,7 +239,7 @@ function TemplateCard({ isDisabled, isLoading, onSelect, template }: TemplateCar
           href={source.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex min-h-11 items-center gap-1.5 border-t border-border px-3 text-[11px] font-bold text-content-subtle hover:text-accent-hover"
+          className="mt-auto flex min-h-11 items-center gap-1.5 border-t border-border px-3 text-xs font-semibold text-content-muted transition-colors hover:text-accent-hover"
         >
           <ExternalLink size={12} /> {getSourceLabel(source)}
         </a>

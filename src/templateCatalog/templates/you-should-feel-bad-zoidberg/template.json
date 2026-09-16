@@ -1,0 +1,15 @@
+{
+  "id": "you-should-feel-bad-zoidberg",
+  "title": "You Should Feel Bad Zoidberg",
+  "aliases": ["Your X Is Bad and You Should Feel Bad"],
+  "tags": ["disapproval", "zoidberg"],
+  "groupIds": ["futurama"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "35747",
+      "url": "https://imgflip.com/memetemplate/35747/You-Should-Feel-Bad-Zoidberg"
+    }
+  ],
+  "image": { "width": 480, "height": 360 }
+}

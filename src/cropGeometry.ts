@@ -74,3 +74,43 @@ export const areCropRectsEqual = (first: CropRect, second: CropRect): boolean =>
   first.y === second.y &&
   first.width === second.width &&
   first.height === second.height;
+
+export const CROP_ASPECT_OPTIONS = [
+  { value: 'free', label: 'Free', ratio: null },
+  { value: 'original', label: 'Original', ratio: 'original' },
+  { value: 'square', label: 'Square', ratio: 1 },
+  { value: 'portrait', label: 'Portrait', ratio: 4 / 5 },
+  { value: 'landscape', label: 'Landscape', ratio: 16 / 9 },
+] as const;
+
+export type CropAspect = (typeof CROP_ASPECT_OPTIONS)[number]['value'];
+
+export const getCropAspectRatio = (aspect: CropAspect, source: Size): number | null => {
+  const option = CROP_ASPECT_OPTIONS.find((candidate) => candidate.value === aspect);
+  if (!option) throw new Error('Invalid crop aspect ratio.');
+  return option.ratio === 'original' ? source.width / source.height : option.ratio;
+};
+
+// Fit around the draft's center. A locked ratio must survive both resizing and edge clamping.
+export const fitCropToAspectRatio = (
+  crop: CropRect,
+  bounds: Size,
+  ratio: number | null,
+  minimumSize: number = DEFAULT_MINIMUM_CROP_SIZE,
+): CropRect | null => {
+  if (ratio === null) return clampCropRect(crop, bounds, minimumSize);
+  const maximumWidth = Math.min(bounds.width, bounds.height * ratio);
+  const minimumWidth = Math.max(minimumSize, minimumSize * ratio);
+  if (maximumWidth < minimumWidth) return null;
+  const width = Math.min(
+    maximumWidth,
+    Math.max(minimumWidth, Math.min(crop.width, crop.height * ratio)),
+  );
+  const height = width / ratio;
+  return {
+    x: Math.max(0, Math.min(crop.x + (crop.width - width) / 2, bounds.width - width)),
+    y: Math.max(0, Math.min(crop.y + (crop.height - height) / 2, bounds.height - height)),
+    width,
+    height,
+  };
+};

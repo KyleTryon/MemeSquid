@@ -13,7 +13,11 @@
     {
       "kind": "know-your-meme",
       "url": "https://knowyourmeme.com/memes/this-is-where-id-put-my-trophy-if-i-had-one"
+    },
+    {
+      "kind": "source",
+      "url": "https://i.ibb.co/S7cczM2t/Dinkleberg-Meme.png"
     }
   ],
-  "image": { "width": 300, "height": 418 }
+  "image": { "width": 1597, "height": 2400 }
 }

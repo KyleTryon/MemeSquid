@@ -22,6 +22,11 @@ The free, local-first meme editor behind [memesquid.com](https://memesquid.com).
 - **Export:** Copy a PNG to the clipboard or download PNG, JPEG, and WebP files at high quality.
 - **Installable PWA:** Add MemeSquid to an Android or iOS home screen and use the core editor offline.
 
+After a successful online installation, the editor, SVG renderer, and template library are cached
+for offline use. App updates activate after existing editor tabs close, so an open project keeps
+using a complete, consistent build. The background-removal model and its large WASM runtime are
+downloaded separately when background removal is first used.
+
 ## Local Background Removal
 
 Background removal is performed on your device with Transformers.js and the

@@ -1,0 +1,15 @@
+{
+  "id": "futurama-zero-days-since-last-blank",
+  "title": "Futurama Zero Days Since Last Blank",
+  "aliases": ["0 Days Since Last", "Zero Days Since Last"],
+  "tags": ["accident", "counter", "sign"],
+  "groupIds": ["futurama"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "448742875",
+      "url": "https://imgflip.com/memetemplate/448742875/Futurama-Zero-Days-Since-Last-Blank"
+    }
+  ],
+  "image": { "width": 1058, "height": 937 }
+}

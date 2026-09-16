@@ -1,0 +1,19 @@
+{
+  "id": "surprised-pikachu",
+  "title": "Surprised Pikachu",
+  "aliases": ["Shocked Pikachu"],
+  "tags": ["pikachu", "reaction", "surprise"],
+  "groupIds": ["pokemon"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "155067746",
+      "url": "https://imgflip.com/memetemplate/155067746/Surprised-Pikachu"
+    },
+    {
+      "kind": "source",
+      "url": "https://www.reddit.com/r/MemeRestoration/comments/axlbjw/surprised_pikachu/"
+    }
+  ],
+  "image": { "width": 2400, "height": 2086 }
+}

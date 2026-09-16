@@ -1,3 +1,5 @@
+import type { CropRect } from './types';
+
 export interface ViewportPoint {
   x: number;
   y: number;
@@ -51,3 +53,27 @@ export const getScrollDeltaForLogicalPoint = (
   x: rect.left + logicalPoint.x * zoom - clientPoint.x,
   y: rect.top + logicalPoint.y * zoom - clientPoint.y,
 });
+
+// All measurements are displayed pixels, independent of canvas zoom.
+export const getImageActionsPosition = (
+  image: CropRect,
+  toolbar: Pick<CropRect, 'width' | 'height'>,
+  viewport: Pick<CropRect, 'width' | 'height'>,
+): ViewportPoint => {
+  const padding = 8;
+  const gap = 12;
+  const below = image.y + image.height + gap;
+  const above = image.y - toolbar.height - gap;
+  const preferredY = below + toolbar.height <= viewport.height - padding ? below : above;
+
+  return {
+    x: Math.max(
+      padding,
+      Math.min(
+        image.x + (image.width - toolbar.width) / 2,
+        viewport.width - toolbar.width - padding,
+      ),
+    ),
+    y: Math.max(padding, Math.min(preferredY, viewport.height - toolbar.height - padding)),
+  };
+};

@@ -1,0 +1,15 @@
+{
+  "id": "futurama-fry",
+  "title": "Futurama Fry",
+  "aliases": ["Not Sure If", "Skeptical Fry", "Suspicious Fry"],
+  "tags": ["confusion", "fry", "skepticism"],
+  "groupIds": ["futurama"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "61520",
+      "url": "https://imgflip.com/memetemplate/61520/Futurama-Fry"
+    }
+  ],
+  "image": { "width": 552, "height": 414 }
+}

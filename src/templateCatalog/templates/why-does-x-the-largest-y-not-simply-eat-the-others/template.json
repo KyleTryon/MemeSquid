@@ -1,0 +1,15 @@
+{
+  "id": "why-does-x-the-largest-y-not-simply-eat-the-others",
+  "title": "Why does X, the largest Y, not simply eat the others?",
+  "aliases": ["Futurama Friends", "Lrrr", "Not Simply Eat"],
+  "tags": ["aliens", "logic", "lrrr"],
+  "groupIds": ["futurama"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "196189452",
+      "url": "https://imgflip.com/memetemplate/196189452/Why-does-X-the-largest-Y-not-simply-eat-the-others"
+    }
+  ],
+  "image": { "width": 640, "height": 473 }
+}

@@ -1,0 +1,19 @@
+{
+  "id": "shut-up-and-take-my-money-fry",
+  "title": "Shut Up And Take My Money Fry",
+  "aliases": ["Futurama Fry Cash in Hand"],
+  "tags": ["excitement", "fry", "money"],
+  "groupIds": ["futurama"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "176908",
+      "url": "https://imgflip.com/memetemplate/176908/Shut-Up-And-Take-My-Money-Fry"
+    },
+    {
+      "kind": "source",
+      "url": "https://i.redd.it/tqqwh2p5dzwf1.png"
+    }
+  ],
+  "image": { "width": 2400, "height": 1350 }
+}

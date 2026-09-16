@@ -1,0 +1,15 @@
+{
+  "id": "0-days-without-lenny-simpsons",
+  "title": "0 Days Without (Lenny, Simpsons)",
+  "aliases": ["Days Without an Accident", "Zero Days Without Lenny"],
+  "tags": ["accident", "counter", "lenny", "sign"],
+  "groupIds": ["the-simpsons"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "427308417",
+      "url": "https://imgflip.com/memetemplate/427308417/0-days-without-Lenny-Simpsons"
+    }
+  ],
+  "image": { "width": 2100, "height": 1450 }
+}

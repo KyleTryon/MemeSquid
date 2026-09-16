@@ -13,7 +13,7 @@
   --color-border: #1a3a54;
   --color-border-strong: #315c73;
   --color-border-emphasis: #64869a;
-  --color-content-subtle: #64869a;
+  --color-content-subtle: #809eaf;
   --color-content-muted: #91aebc;
   --color-content-secondary: #bfd2da;
   --color-content: #dce9ed;
@@ -63,12 +63,53 @@ body {
   background-size: 16px 16px;
 }
 
-button,
-label,
-input,
-select,
-textarea {
-  font: inherit;
+@layer base {
+  button,
+  label,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .field-label {
+    color: var(--color-content-muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.5;
+    text-transform: uppercase;
+  }
+
+  .dialog-close-button {
+    display: flex;
+    width: 2.75rem;
+    height: 2.75rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.75rem;
+    color: var(--color-content-muted);
+    transition:
+      color 150ms ease,
+      background-color 150ms ease;
+  }
+
+  .dialog-close-button:hover:not(:disabled) {
+    background: var(--color-surface-hover);
+    color: var(--color-content-strong);
+  }
+
+  .dialog-close-button:disabled {
+    opacity: 0.4;
+  }
+
+  .dialog-panel {
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 }
 
 button,
@@ -86,7 +127,7 @@ button:disabled {
   cursor: not-allowed;
 }
 
-:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--color-accent-hover) !important;
   outline-offset: 2px;
 }
@@ -125,6 +166,9 @@ button:disabled {
 }
 
 .mobile-sheet {
+  max-height: calc(100dvh - max(1rem, env(safe-area-inset-top)));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding-bottom: max(1rem, env(safe-area-inset-bottom));
 }
 
@@ -183,7 +227,7 @@ button:disabled {
 
 .properties-panel .color-picker-value,
 .properties-panel .color-picker-button {
-  min-height: 2.25rem;
+  min-height: 2.75rem;
   border-radius: 0.5rem;
 }
 
@@ -272,6 +316,13 @@ button:disabled {
 }
 
 @media (max-width: 767px) {
+  /* Keep editable fields legible without triggering automatic input zoom. */
+  input:not([type='range']):not([type='color']):not([type='file']),
+  select,
+  textarea {
+    font-size: 1rem;
+  }
+
   .mobile-sheet-overlay {
     visibility: hidden;
     pointer-events: none;

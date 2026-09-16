@@ -1,0 +1,15 @@
+{
+  "id": "bender",
+  "title": "Bender",
+  "aliases": ["Futurama Bender"],
+  "tags": ["bender", "robot"],
+  "groupIds": ["futurama"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "59250",
+      "url": "https://imgflip.com/memetemplate/59250/Bender"
+    }
+  ],
+  "image": { "width": 620, "height": 465 }
+}

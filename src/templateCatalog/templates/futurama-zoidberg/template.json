@@ -1,0 +1,15 @@
+{
+  "id": "futurama-zoidberg",
+  "title": "Futurama Zoidberg",
+  "aliases": ["Why Not Zoidberg"],
+  "tags": ["suggestion", "zoidberg"],
+  "groupIds": ["futurama"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "61573",
+      "url": "https://imgflip.com/memetemplate/61573/Futurama-Zoidberg"
+    }
+  ],
+  "image": { "width": 548, "height": 420 }
+}

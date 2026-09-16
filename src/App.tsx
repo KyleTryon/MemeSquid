@@ -68,6 +68,8 @@ import {
   applyImageCrop,
   areCropRectsEqual,
   clampCropRect,
+  fitCropToAspectRatio,
+  getCropAspectRatio,
   getFullCrop,
   getImageSourceSize,
   roundCropRect,
@@ -75,6 +77,7 @@ import {
 import {
   clampZoom,
   getLogicalPointAtClientPosition,
+  getImageActionsPosition,
   getPinchZoom,
   getPointCenter,
   getPointDistance,
@@ -82,17 +85,32 @@ import {
   type ViewportPoint,
 } from './canvasViewport';
 import { patchItemById, removeItemById, updateItemById } from './collectionUtils';
+import { appendDrawPoint } from './drawing';
+import {
+  TEXT_ELEMENT_CLIPBOARD_TYPE,
+  copyTextElement,
+  readCopiedTextElement,
+  createPastedTextElement,
+} from './textClipboard';
 import type { ItemPatch } from './collectionUtils';
 import { useAxisLockedDrag, useSelectedTransformer } from './konvaInteractions';
-import { Canvg } from 'canvg';
 import { usePwaInstall } from './usePwaInstall';
 import { ColorPicker } from './ColorPicker';
 import type { CatalogTemplate } from './templateCatalog/catalog';
 import { useDialogFocus } from './useDialogFocus';
+import { useFeedback } from './useFeedback';
+import { FeedbackNotice } from './FeedbackNotice';
+import { CropProperties } from './CropProperties';
+import type { CropAspect } from './cropGeometry';
+import { readImageFile, downloadImage } from './imageFiles';
 
 const TemplateLibraryDialog = React.lazy(() => import('./TemplateLibraryDialog'));
 
 const round2 = (num: number) => Math.round(num * 100) / 100;
+
+const isTextEditingTarget = (target: EventTarget | null): boolean =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable || Boolean(target.closest('input, textarea, select')));
 
 const getFlippedImage = (image: ImageElement, axis: TransformAxis): ImageElement => {
   const transform = getCenteredImageFlip(image, axis);
@@ -113,10 +131,13 @@ const toKonvaElementData = <T extends object>(element: T): Omit<T, 'zIndex' | '_
   return data;
 };
 
+const BACKGROUND_REMOVAL_ERROR = 'Background removal failed. Your image is unchanged. Try again.';
+
 const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'] as const;
 const IMAGE_ACCEPT = IMAGE_MIME_TYPES.join(',');
 const isSupportedImageMimeType = (mimeType: string) =>
   IMAGE_MIME_TYPES.some((validType) => validType === mimeType);
+const CROP_CORNER_ANCHORS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
 const TRANSFORMER_ANCHOR_SIZE = window.matchMedia('(pointer: coarse)').matches ? 22 : 10;
 
 const ALIGNMENT_OPTIONS = [
@@ -153,8 +174,10 @@ const areEditorSnapshotsEqual = (first: EditorSnapshot, second: EditorSnapshot):
   const canvasEqual = JSON.stringify(first.canvas) === JSON.stringify(second.canvas);
   const linesEqual = JSON.stringify(first.lines) === JSON.stringify(second.lines);
   const imagesEqual =
+    first.images.length === second.images.length &&
+    first.images.every((image, index) => image.image === second.images[index].image) &&
     JSON.stringify(first.images.map((image) => ({ ...image, image: null }))) ===
-    JSON.stringify(second.images.map((image) => ({ ...image, image: null })));
+      JSON.stringify(second.images.map((image) => ({ ...image, image: null })));
 
   return textsEqual && canvasEqual && linesEqual && imagesEqual;
 };
@@ -262,10 +285,20 @@ interface MobileDialogSheetProps {
   onClose: () => void;
   dialogRef: React.RefObject<HTMLDivElement | null>;
   children: React.ReactNode;
+  feedback: React.ReactNode;
 }
 
 const MobileDialogSheet = memo(
-  ({ id, title, description, isOpen, onClose, dialogRef, children }: MobileDialogSheetProps) => {
+  ({
+    id,
+    title,
+    description,
+    isOpen,
+    onClose,
+    dialogRef,
+    children,
+    feedback,
+  }: MobileDialogSheetProps) => {
     const drag = useBottomSheetDrag(onClose);
     const titleId = `${id}-title`;
 
@@ -303,11 +336,12 @@ const MobileDialogSheet = memo(
               type="button"
               onClick={onClose}
               aria-label={`Close ${title.toLowerCase()}`}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-content-muted"
+              className="dialog-close-button bg-surface"
             >
               <X size={18} />
             </button>
           </div>
+          {isOpen && feedback}
           {children}
         </div>
       </div>
@@ -348,8 +382,10 @@ interface TextPinchGesture {
 
 type PinchGesture = CanvasPinchGesture | ImagePinchGesture | TextPinchGesture;
 
-type CropSession =
-  { kind: 'image'; targetId: string; draft: CropRect } | { kind: 'canvas'; draft: CropRect };
+type CropSession = ({ kind: 'image'; targetId: string } | { kind: 'canvas' }) & {
+  draft: CropRect;
+  aspect: CropAspect;
+};
 
 interface ImagePlacement {
   x: number;
@@ -618,7 +654,7 @@ const CanvasAlignmentControl = ({
         key={value}
         type="button"
         onClick={() => onAlign(value)}
-        className="flex h-11 w-11 md:h-8 md:w-8 items-center justify-center rounded-xl border border-border bg-canvas/50 text-content-subtle hover:border-accent hover:bg-accent/10 hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent transition-colors"
+        className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-canvas/50 text-content-subtle hover:border-accent hover:bg-accent/10 hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent transition-colors"
         aria-label={label}
         title={label}
       >
@@ -647,6 +683,7 @@ const App = () => {
   const [drawWidth, setDrawWidth] = useState(5);
   const isDrawing = useRef(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
+  const [isStartOverOpen, setIsStartOverOpen] = useState(false);
   const [isTemplateLibraryOpen, setIsTemplateLibraryOpen] = useState(false);
   const [loadingTemplateId, setLoadingTemplateId] = useState<string | null>(null);
   const [isMobilePropsOpen, setIsMobilePropsOpen] = useState(false);
@@ -654,6 +691,8 @@ const App = () => {
   const [isMobileLayersOpen, setIsMobileLayersOpen] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [announcement, setAnnouncement] = useState('');
+  const { notice, notify, dismissNotice, runWithFeedback } = useFeedback();
+  const lastTextPasteRef = useRef<{ serialized: string; offset: number } | null>(null);
   const { canInstall, dismissInstallHelp, install, installMode, isAppleMobile, isInstallHelpOpen } =
     usePwaInstall();
   const addImageInputRef = useRef<HTMLInputElement | null>(null);
@@ -671,11 +710,28 @@ const App = () => {
   const zoomHudTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const closeAbout = useCallback(() => setIsAboutOpen(false), []);
+  const closeStartOver = useCallback(() => setIsStartOverOpen(false), []);
   const closeMobileAdd = useCallback(() => setIsMobileAddOpen(false), []);
   const closeMobileProps = useCallback(() => setIsMobilePropsOpen(false), []);
+  const openMobileProps = useCallback(() => {
+    if (window.matchMedia('(max-width: 767px)').matches) setIsMobilePropsOpen(true);
+  }, []);
+
+  useEffect(() => {
+    const desktopLayout = window.matchMedia('(min-width: 768px)');
+    const closeMobileSheets = () => {
+      if (!desktopLayout.matches) return;
+      setIsMobileAddOpen(false);
+      setIsMobileLayersOpen(false);
+      setIsMobilePropsOpen(false);
+    };
+    desktopLayout.addEventListener('change', closeMobileSheets);
+    return () => desktopLayout.removeEventListener('change', closeMobileSheets);
+  }, []);
   const closeMobileLayers = useCallback(() => setIsMobileLayersOpen(false), []);
   const closeTemplateLibrary = useCallback(() => {
-    if (!loadingTemplateId) setIsTemplateLibraryOpen(false);
+    if (loadingTemplateId) return;
+    setIsTemplateLibraryOpen(false);
   }, [loadingTemplateId]);
   const cancelExpansion = useCallback(() => {
     const side = expansionSideRef.current;
@@ -685,6 +741,7 @@ const App = () => {
     });
   }, []);
   const aboutDialogRef = useDialogFocus(isAboutOpen, closeAbout);
+  const startOverDialogRef = useDialogFocus(isStartOverOpen, closeStartOver);
   const installHelpDialogRef = useDialogFocus(isInstallHelpOpen, dismissInstallHelp);
   const mobileAddDialogRef = useDialogFocus(isMobileAddOpen, closeMobileAdd);
   const mobilePropsDialogRef = useDialogFocus<HTMLElement>(isMobilePropsOpen, closeMobileProps);
@@ -769,6 +826,15 @@ const App = () => {
   const workerRef = useRef<Worker | null>(null);
   const workerReadyRef = useRef(false);
   const pendingBgRemovalRef = useRef<PendingBackgroundRemoval | null>(null);
+  const isEditorDialogOpen =
+    isAboutOpen ||
+    isStartOverOpen ||
+    isTemplateLibraryOpen ||
+    isInstallHelpOpen ||
+    isMobileAddOpen ||
+    isMobilePropsOpen ||
+    isMobileLayersOpen ||
+    bgRemovalState.status === 'warning';
 
   // --- History State ---
   const [past, setPast] = useState<EditorSnapshot[]>([]);
@@ -793,6 +859,7 @@ const App = () => {
       let imgHeight: number;
 
       if (isSvg) {
+        const { Canvg } = await import('canvg');
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         if (!ctx) throw new Error('The browser could not create an image canvas.');
@@ -886,28 +953,31 @@ const App = () => {
     (file: File) => {
       const placement = pendingImagePlacementRef.current;
       pendingImagePlacementRef.current = null;
-      if (!isSupportedImageMimeType(file.type)) return;
-
-      const isSvg = file.type === 'image/svg+xml';
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const result = event.target?.result;
-        if (typeof result === 'string') {
-          const mode: ImageLoadMode = canvas ? 'add-layer' : 'start-project';
-          void handleImageLoad(result, isSvg, mode, placement).catch((error: Error) => {
-            console.error('Failed to load image', error);
-            setAnnouncement('The selected image could not be loaded.');
-          });
-        }
-      };
-
-      if (isSvg) {
-        reader.readAsText(file);
-      } else {
-        reader.readAsDataURL(file);
+      if (!isSupportedImageMimeType(file.type)) {
+        notify({
+          kind: 'error',
+          message: 'Unsupported image format. Choose a PNG, JPG, WebP, or SVG file.',
+        });
+        return;
       }
+
+      void runWithFeedback(
+        async () => {
+          const source = await readImageFile(file);
+          await handleImageLoad(
+            source,
+            file.type === 'image/svg+xml',
+            canvas ? 'add-layer' : 'start-project',
+            placement,
+          );
+        },
+        {
+          success: 'Image added to your meme.',
+          error: 'The image could not be loaded. Try another file.',
+        },
+      );
     },
-    [canvas, handleImageLoad],
+    [canvas, handleImageLoad, notify, runWithFeedback],
   );
 
   const startWithTemplate = useCallback(
@@ -922,18 +992,22 @@ const App = () => {
       }
 
       setLoadingTemplateId(template.id);
-      try {
-        await handleImageLoad(template.sourceUrl, false, 'start-project');
-        setIsTemplateLibraryOpen(false);
-        setAnnouncement(`Started a new meme with ${template.title}.`);
-      } catch (error) {
-        console.error('Failed to load template', error);
-        setAnnouncement(`${template.title} could not be loaded.`);
-      } finally {
-        setLoadingTemplateId(null);
-      }
+      await runWithFeedback(
+        async () => {
+          try {
+            await handleImageLoad(template.sourceUrl, false, 'start-project');
+            setIsTemplateLibraryOpen(false);
+          } finally {
+            setLoadingTemplateId(null);
+          }
+        },
+        {
+          success: `Started a new meme with ${template.title}.`,
+          error: `${template.title} could not be loaded. Try again or choose another template.`,
+        },
+      );
     },
-    [canvas, handleImageLoad],
+    [canvas, handleImageLoad, runWithFeedback],
   );
 
   const createBlankCanvas = useCallback(() => {
@@ -998,27 +1072,6 @@ const App = () => {
     },
     [loadImageFile],
   );
-
-  const handlePaste = useCallback(
-    (e: ClipboardEvent) => {
-      if (isTemplateLibraryOpen) return;
-      const items = e.clipboardData?.items;
-      if (items) {
-        for (let i = 0; i < items.length; i++) {
-          if (isSupportedImageMimeType(items[i].type)) {
-            const blob = items[i].getAsFile();
-            if (blob) loadImageFile(blob);
-          }
-        }
-      }
-    },
-    [isTemplateLibraryOpen, loadImageFile],
-  );
-
-  useEffect(() => {
-    window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
-  }, [handlePaste]);
 
   useEffect(() => {
     const input = addImageInputRef.current;
@@ -1159,57 +1212,81 @@ const App = () => {
         const img = new Image();
         img.crossOrigin = 'Anonymous';
         img.onload = () => {
-          const canvas = document.createElement('canvas');
-          canvas.width = img.width;
-          canvas.height = img.height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) return reject(new Error('Could not create an image canvas context.'));
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return reject(new Error('Could not create an image canvas context.'));
 
-          ctx.drawImage(img, 0, 0);
+            ctx.drawImage(img, 0, 0);
 
-          const maskCanvas = document.createElement('canvas');
-          maskCanvas.width = maskWidth;
-          maskCanvas.height = maskHeight;
-          const maskCtx = maskCanvas.getContext('2d');
-          if (!maskCtx) return reject(new Error('Could not create a mask canvas context.'));
+            const maskCanvas = document.createElement('canvas');
+            maskCanvas.width = maskWidth;
+            maskCanvas.height = maskHeight;
+            const maskCtx = maskCanvas.getContext('2d');
+            if (!maskCtx) return reject(new Error('Could not create a mask canvas context.'));
 
-          const maskImageData = maskCtx.createImageData(maskWidth, maskHeight);
-          const isFloat = maskData instanceof Float32Array;
+            const maskImageData = maskCtx.createImageData(maskWidth, maskHeight);
+            const isFloat = maskData instanceof Float32Array;
 
-          for (let i = 0; i < maskWidth * maskHeight; i++) {
-            let alpha = 255;
-            if (channels === 1) {
-              alpha = maskData[i];
-            } else if (channels === 4) {
-              alpha = maskData[i * 4 + 3];
-            } else if (channels === 3) {
-              alpha = maskData[i * 3]; // Use R channel
+            for (let i = 0; i < maskWidth * maskHeight; i++) {
+              let alpha = 255;
+              if (channels === 1) {
+                alpha = maskData[i];
+              } else if (channels === 4) {
+                alpha = maskData[i * 4 + 3];
+              } else if (channels === 3) {
+                alpha = maskData[i * 3]; // Use R channel
+              }
+
+              if (isFloat) {
+                alpha = Math.round(alpha * 255);
+              }
+
+              maskImageData.data[i * 4] = 0;
+              maskImageData.data[i * 4 + 1] = 0;
+              maskImageData.data[i * 4 + 2] = 0;
+              maskImageData.data[i * 4 + 3] = alpha;
             }
+            maskCtx.putImageData(maskImageData, 0, 0);
 
-            if (isFloat) {
-              alpha = Math.round(alpha * 255);
-            }
+            ctx.globalCompositeOperation = 'destination-in';
+            ctx.drawImage(maskCanvas, 0, 0, canvas.width, canvas.height);
 
-            maskImageData.data[i * 4] = 0;
-            maskImageData.data[i * 4 + 1] = 0;
-            maskImageData.data[i * 4 + 2] = 0;
-            maskImageData.data[i * 4 + 3] = alpha;
+            const finalImg = new Image();
+            finalImg.onload = () => resolve(finalImg);
+            finalImg.onerror = reject;
+            finalImg.src = canvas.toDataURL('image/png');
+          } catch (error) {
+            reject(
+              error instanceof Error
+                ? error
+                : new Error('The background mask could not be applied.'),
+            );
           }
-          maskCtx.putImageData(maskImageData, 0, 0);
-
-          ctx.globalCompositeOperation = 'destination-in';
-          ctx.drawImage(maskCanvas, 0, 0, canvas.width, canvas.height);
-
-          const finalImg = new Image();
-          finalImg.onload = () => resolve(finalImg);
-          finalImg.onerror = reject;
-          finalImg.src = canvas.toDataURL('image/png');
         };
         img.onerror = reject;
         img.src = originalImageUrl;
       });
     },
     [],
+  );
+
+  const failBackgroundRemoval = useCallback(
+    (detail: string) => {
+      console.error('Background removal failed:', detail);
+      pendingBgRemovalRef.current = null;
+      workerRef.current?.terminate();
+      workerRef.current = null;
+      workerReadyRef.current = false;
+      setBgRemovalState({ status: 'idle' });
+      notify({
+        kind: 'error',
+        message: BACKGROUND_REMOVAL_ERROR,
+      });
+    },
+    [notify],
   );
 
   const initWorker = useCallback((): Worker => {
@@ -1238,10 +1315,16 @@ const App = () => {
         }
 
         setBgRemovalState({ status: 'processing', targetId: pending.id });
-        worker.postMessage({
-          type: 'REMOVE_BG',
-          data: { imageUrl: pending.imageUrl, id: pending.id },
-        });
+        try {
+          worker.postMessage({
+            type: 'REMOVE_BG',
+            data: { imageUrl: pending.imageUrl, id: pending.id },
+          });
+        } catch (error) {
+          failBackgroundRemoval(
+            error instanceof Error ? error.message : 'The worker could not process this image.',
+          );
+        }
         return;
       }
 
@@ -1257,39 +1340,44 @@ const App = () => {
           return;
         }
 
-        void applyMask(originalUrl, maskData, width, height, channels)
-          .then((newImage) => {
-            setImages((currentImages) =>
-              patchItemById(currentImages, id, {
-                image: newImage,
-                bgRemoved: true,
-                originalSrc: originalUrl,
-              }),
-            );
-            setAnnouncement('Background removed. Your transparent PNG is ready to download.');
-          })
-          .catch((error) => {
-            console.error('Failed to apply background mask', error);
-            alert('Background removal failed while applying the generated mask.');
-          })
-          .finally(() => {
-            if (pendingBgRemovalRef.current?.id === id) pendingBgRemovalRef.current = null;
-            setBgRemovalState((current) =>
-              'targetId' in current && current.targetId === id ? { status: 'idle' } : current,
-            );
-          });
+        void runWithFeedback(
+          async () => {
+            try {
+              const newImage = await applyMask(originalUrl, maskData, width, height, channels);
+              setImages((currentImages) =>
+                patchItemById(currentImages, id, {
+                  image: newImage,
+                  bgRemoved: true,
+                  originalSrc: originalUrl,
+                }),
+              );
+            } finally {
+              if (pendingBgRemovalRef.current?.id === id) pendingBgRemovalRef.current = null;
+              setBgRemovalState((current) =>
+                'targetId' in current && current.targetId === id ? { status: 'idle' } : current,
+              );
+            }
+          },
+          {
+            success: 'Background removed. Use Download PNG in the image menu to save it.',
+            error: BACKGROUND_REMOVAL_ERROR,
+          },
+        );
         return;
       }
 
-      pendingBgRemovalRef.current = null;
-      setBgRemovalState({ status: 'idle' });
-      console.error('Background removal worker error:', message.data);
-      alert(`Background removal failed: ${message.data}`);
+      failBackgroundRemoval(message.data);
     };
+    worker.onerror = (event) => {
+      event.preventDefault();
+      failBackgroundRemoval(event.message);
+    };
+    worker.onmessageerror = () =>
+      failBackgroundRemoval('The background removal worker returned unreadable data.');
 
     workerRef.current = worker;
     return worker;
-  }, [applyMask]);
+  }, [applyMask, failBackgroundRemoval, runWithFeedback]);
 
   const startBackgroundRemoval = useCallback(
     (targetId: string) => {
@@ -1297,65 +1385,84 @@ const App = () => {
       if (!targetImage || targetImage.bgRemoved) return;
       if (bgRemovalState.status === 'downloading' || bgRemovalState.status === 'processing') return;
 
-      const originalCanvas = document.createElement('canvas');
-      originalCanvas.width = targetImage.image.width;
-      originalCanvas.height = targetImage.image.height;
-      const originalContext = originalCanvas.getContext('2d');
-      if (!originalContext) return;
-      originalContext.drawImage(targetImage.image, 0, 0);
-      const originalUrl = originalCanvas.toDataURL('image/png');
+      try {
+        const originalCanvas = document.createElement('canvas');
+        originalCanvas.width = targetImage.image.width;
+        originalCanvas.height = targetImage.image.height;
+        const originalContext = originalCanvas.getContext('2d');
+        if (!originalContext) throw new Error('The image canvas could not be created.');
+        originalContext.drawImage(targetImage.image, 0, 0);
+        const originalUrl = originalCanvas.toDataURL('image/png');
 
-      const processingCanvas = document.createElement('canvas');
-      processingCanvas.width = targetImage.image.width;
-      processingCanvas.height = targetImage.image.height;
-      const processingContext = processingCanvas.getContext('2d');
-      if (!processingContext) return;
-      processingContext.fillStyle = '#ffffff';
-      processingContext.fillRect(0, 0, processingCanvas.width, processingCanvas.height);
-      processingContext.drawImage(targetImage.image, 0, 0);
+        const processingCanvas = document.createElement('canvas');
+        processingCanvas.width = targetImage.image.width;
+        processingCanvas.height = targetImage.image.height;
+        const processingContext = processingCanvas.getContext('2d');
+        if (!processingContext) throw new Error('The processing canvas could not be created.');
+        processingContext.fillStyle = '#ffffff';
+        processingContext.fillRect(0, 0, processingCanvas.width, processingCanvas.height);
+        processingContext.drawImage(targetImage.image, 0, 0);
 
-      const pending = {
-        id: targetId,
-        imageUrl: processingCanvas.toDataURL('image/jpeg', 0.9),
-        originalUrl,
-      } satisfies PendingBackgroundRemoval;
-      pendingBgRemovalRef.current = pending;
+        const pending = {
+          id: targetId,
+          imageUrl: processingCanvas.toDataURL('image/jpeg', 0.9),
+          originalUrl,
+        } satisfies PendingBackgroundRemoval;
+        pendingBgRemovalRef.current = pending;
 
-      const worker = initWorker();
-      if (workerReadyRef.current) {
-        setBgRemovalState({ status: 'processing', targetId });
-        worker.postMessage({
-          type: 'REMOVE_BG',
-          data: { imageUrl: pending.imageUrl, id: targetId },
-        });
-        return;
+        const worker = initWorker();
+        if (workerReadyRef.current) {
+          setBgRemovalState({ status: 'processing', targetId });
+          worker.postMessage({
+            type: 'REMOVE_BG',
+            data: { imageUrl: pending.imageUrl, id: targetId },
+          });
+          return;
+        }
+
+        setBgRemovalState({ status: 'downloading', targetId, progress: 0 });
+        worker.postMessage({ type: 'INIT' });
+      } catch (error) {
+        failBackgroundRemoval(
+          error instanceof Error
+            ? error.message
+            : 'The background removal model could not be started.',
+        );
       }
-
-      setBgRemovalState({ status: 'downloading', targetId, progress: 0 });
-      worker.postMessage({ type: 'INIT' });
     },
-    [bgRemovalState.status, images, initWorker],
+    [bgRemovalState.status, images, initWorker, failBackgroundRemoval],
   );
 
   const requestBackgroundRemoval = useCallback(
     (targetId: string) => {
       if (bgRemovalState.status === 'downloading' || bgRemovalState.status === 'processing') return;
 
-      if (localStorage.getItem('bg-model-accepted')) {
-        startBackgroundRemoval(targetId);
-      } else {
-        setBgRemovalState({ status: 'warning', targetId });
+      try {
+        if (localStorage.getItem('bg-model-accepted')) startBackgroundRemoval(targetId);
+        else setBgRemovalState({ status: 'warning', targetId });
+      } catch {
+        notify({
+          kind: 'error',
+          message: 'Background removal could not start. Allow site storage and try again.',
+        });
       }
     },
-    [bgRemovalState.status, startBackgroundRemoval],
+    [bgRemovalState.status, startBackgroundRemoval, notify],
   );
 
   const acceptModelDownload = useCallback(() => {
     if (bgRemovalState.status !== 'warning') return;
     const targetId = bgRemovalState.targetId;
-    localStorage.setItem('bg-model-accepted', 'true');
-    startBackgroundRemoval(targetId);
-  }, [bgRemovalState, startBackgroundRemoval]);
+    try {
+      localStorage.setItem('bg-model-accepted', 'true');
+      startBackgroundRemoval(targetId);
+    } catch {
+      notify({
+        kind: 'error',
+        message: 'The model download could not start. Allow site storage and try again.',
+      });
+    }
+  }, [bgRemovalState, startBackgroundRemoval, notify]);
 
   const cancelModelDownload = useCallback(() => {
     pendingBgRemovalRef.current = null;
@@ -1367,6 +1474,24 @@ const App = () => {
   );
 
   // --- History Logic ---
+  const saveHistorySnapshot = useCallback((snapshot: EditorSnapshot) => {
+    setPast((current) => [...current, snapshot].slice(-50));
+  }, []);
+
+  const restoreEditorSnapshot = useCallback((snapshot: EditorSnapshot) => {
+    isDrawing.current = false;
+    activeDrawLineIdRef.current = null;
+    isHistoryAction.current = true;
+    lastSaved.current = snapshot;
+    setHasPendingHistoryChange(false);
+    setCanvas(snapshot.canvas);
+    setTexts(snapshot.texts);
+    setLines(snapshot.lines);
+    setImages(snapshot.images);
+    setCropSession(null);
+    setExpansionDraft(null);
+  }, []);
+
   useEffect(() => {
     const currentSnapshot = { canvas, texts, lines, images } satisfies EditorSnapshot;
 
@@ -1381,69 +1506,42 @@ const App = () => {
     setHasPendingHistoryChange(hasChanges);
     if (!hasChanges) return;
     setFuture((current) => (current.length > 0 ? [] : current));
+    // A stroke is one edit even if the pointer pauses before it ends.
+    if (isDrawing.current) return;
 
     const timeout = setTimeout(() => {
       if (!areEditorSnapshotsEqual(lastSaved.current, currentSnapshot)) {
-        setPast((p) => [...p, lastSaved.current].slice(-50));
+        saveHistorySnapshot(lastSaved.current);
         lastSaved.current = currentSnapshot;
       }
       setHasPendingHistoryChange(false);
     }, 400);
 
     return () => clearTimeout(timeout);
-  }, [canvas, texts, lines, images]);
+  }, [canvas, texts, lines, images, saveHistorySnapshot]);
 
   const undo = useCallback(() => {
     const currentSnapshot = { canvas, texts, lines, images } satisfies EditorSnapshot;
     if (!areEditorSnapshotsEqual(lastSaved.current, currentSnapshot)) {
-      const previous = lastSaved.current;
       setFuture((current) => [currentSnapshot, ...current]);
-      isHistoryAction.current = true;
-      lastSaved.current = previous;
-      setHasPendingHistoryChange(false);
-      setTexts(previous.texts);
-      setCanvas(previous.canvas);
-      setLines(previous.lines);
-      setImages(previous.images);
+      restoreEditorSnapshot(lastSaved.current);
       return;
     }
 
-    setPast((p) => {
-      if (p.length === 0) return p;
-      const previous = p[p.length - 1];
-      const newPast = p.slice(0, -1);
-
-      setFuture((f) => [{ canvas, texts, lines, images }, ...f]);
-      isHistoryAction.current = true;
-      lastSaved.current = previous;
-      setHasPendingHistoryChange(false);
-      setTexts(previous.texts);
-      setCanvas(previous.canvas);
-      setLines(previous.lines);
-      setImages(previous.images);
-
-      return newPast;
-    });
-  }, [canvas, texts, lines, images]);
+    const previous = past.at(-1);
+    if (!previous) return;
+    setPast(past.slice(0, -1));
+    setFuture((current) => [currentSnapshot, ...current]);
+    restoreEditorSnapshot(previous);
+  }, [canvas, texts, lines, images, past, restoreEditorSnapshot]);
 
   const redo = useCallback(() => {
-    setFuture((f) => {
-      if (f.length === 0) return f;
-      const next = f[0];
-      const newFuture = f.slice(1);
-
-      setPast((p) => [...p, { canvas, texts, lines, images }]);
-      isHistoryAction.current = true;
-      lastSaved.current = next;
-      setHasPendingHistoryChange(false);
-      setTexts(next.texts);
-      setCanvas(next.canvas);
-      setLines(next.lines);
-      setImages(next.images);
-
-      return newFuture;
-    });
-  }, [canvas, texts, lines, images]);
+    const next = future[0];
+    if (!next) return;
+    setFuture(future.slice(1));
+    saveHistorySnapshot({ canvas, texts, lines, images });
+    restoreEditorSnapshot(next);
+  }, [canvas, texts, lines, images, future, restoreEditorSnapshot, saveHistorySnapshot]);
 
   const deleteElement = useCallback((id: string) => {
     setTexts((currentTexts) => removeItemById(currentTexts, id));
@@ -1466,18 +1564,14 @@ const App = () => {
   // --- Keyboard Shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || isEditorDialogOpen) return;
       if (cropSession) return;
       if (e.key === 'Escape' && expansionDraft) {
         e.preventDefault();
         cancelExpansion();
         return;
       }
-      if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement ||
-        e.target instanceof HTMLSelectElement ||
-        (e.target instanceof HTMLElement && e.target.isContentEditable)
-      ) {
+      if (isTextEditingTarget(e.target)) {
         return;
       }
       if ((e.ctrlKey || e.metaKey) && (e.key === '+' || e.key === '=')) {
@@ -1517,6 +1611,7 @@ const App = () => {
     zoomCanvasIn,
     zoomCanvasOut,
     fitCanvasToViewport,
+    isEditorDialogOpen,
   ]);
 
   // --- Editor Logic ---
@@ -1534,7 +1629,11 @@ const App = () => {
     );
     setTexts((prev) => [...prev, newText]);
     setSelectedId(newText.id);
-  }, [lastText]);
+    setTool('select');
+    setIsMobileAddOpen(false);
+    setIsMobileLayersOpen(false);
+    openMobileProps();
+  }, [lastText, openMobileProps]);
 
   const updateText = useCallback((id: string, attrs: ItemPatch<TextElement>) => {
     setTexts((currentTexts) => patchItemById(currentTexts, id, attrs));
@@ -1554,19 +1653,24 @@ const App = () => {
     (id: string) => {
       const targetImage = images.find((image) => image.id === id);
       if (!targetImage?.originalSrc) return;
-
-      const restoredImage = new window.Image();
-      restoredImage.onload = () => {
-        updateImage(id, {
-          image: restoredImage,
-          bgRemoved: false,
-          originalSrc: undefined,
-        });
-      };
-      restoredImage.onerror = () => alert('The original image could not be restored.');
-      restoredImage.src = targetImage.originalSrc;
+      const originalSrc = targetImage.originalSrc;
+      void runWithFeedback(
+        async () => {
+          const restoredImage = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const image = new window.Image();
+            image.onload = () => resolve(image);
+            image.onerror = () => reject(new Error('The original image could not be loaded.'));
+            image.src = originalSrc;
+          });
+          updateImage(id, { image: restoredImage, bgRemoved: false, originalSrc: undefined });
+        },
+        {
+          success: 'Image background restored.',
+          error: 'The original image could not be restored. Try again.',
+        },
+      );
     },
-    [images, updateImage],
+    [images, updateImage, runWithFeedback],
   );
 
   const shiftContent = useCallback((deltaX: number, deltaY: number) => {
@@ -1617,9 +1721,11 @@ const App = () => {
 
       setTool('select');
       setSelectedId(id);
+      setIsMobileAddOpen(false);
+      setIsMobileLayersOpen(false);
       setExpansionDraft(null);
       setIsMobilePropsOpen(false);
-      setCropSession({ kind: 'image', targetId: id, draft: { ...image.crop } });
+      setCropSession({ kind: 'image', targetId: id, draft: { ...image.crop }, aspect: 'free' });
       setAnnouncement('Image crop mode. Adjust the crop frame, then apply or cancel.');
     },
     [images],
@@ -1631,46 +1737,171 @@ const App = () => {
     setTool('select');
     setSelectedId(CANVAS_ID);
     setExpansionDraft(null);
+    setIsMobileAddOpen(false);
+    setIsMobileLayersOpen(false);
     setIsMobilePropsOpen(false);
     setCropSession({
       kind: 'canvas',
+      aspect: 'free',
       draft: { x: 0, y: 0, width: canvas.width, height: canvas.height },
     });
     setAnnouncement('Canvas crop mode. Adjust the crop frame, then apply or cancel.');
   }, [canvas]);
 
-  const updateImageCropDraft = useCallback((crop: CropRect) => {
-    setCropSession((current) =>
-      current?.kind === 'image' ? { ...current, draft: crop } : current,
-    );
+  const getCropSource = useCallback(
+    (session: CropSession) => {
+      if (session.kind === 'canvas') return canvas;
+      const image = images.find((candidate) => candidate.id === session.targetId);
+      return image ? getImageSourceSize(image.image) : null;
+    },
+    [canvas, images],
+  );
+
+  const updateCropDraft = useCallback((draft: CropRect) => {
+    setCropSession((current) => (current ? { ...current, draft } : current));
   }, []);
 
-  const updateCanvasCropDraft = useCallback((crop: CropRect) => {
-    setCropSession((current) =>
-      current?.kind === 'canvas' ? { ...current, draft: crop } : current,
-    );
-  }, []);
+  const changeCropAspect = useCallback(
+    (aspect: CropAspect) => {
+      setCropSession((current) => {
+        if (!current) return current;
+        const source = getCropSource(current);
+        if (!source) return current;
+        const draft = fitCropToAspectRatio(
+          current.draft,
+          source,
+          getCropAspectRatio(aspect, source),
+          current.kind === 'canvas' ? MIN_CANVAS_SIZE : 1,
+        );
+        return draft ? { ...current, aspect, draft } : current;
+      });
+    },
+    [getCropSource],
+  );
 
   const resetCrop = useCallback(() => {
     setCropSession((current) => {
       if (!current) return current;
-      if (current.kind === 'canvas') {
-        return canvas
-          ? { ...current, draft: { x: 0, y: 0, width: canvas.width, height: canvas.height } }
-          : null;
-      }
-
-      const image = images.find((candidate) => candidate.id === current.targetId);
-      return image ? { ...current, draft: getFullCrop(getImageSourceSize(image.image)) } : null;
+      const source = getCropSource(current);
+      return source ? { ...current, aspect: 'free', draft: getFullCrop(source) } : null;
     });
-  }, [canvas, images]);
+  }, [getCropSource]);
 
   const checkpointEditorHistory = useCallback(() => {
-    setPast((current) => [...current, { canvas, texts, lines, images }].slice(-50));
+    const snapshot = { canvas, texts, lines, images } satisfies EditorSnapshot;
+    if (!areEditorSnapshotsEqual(lastSaved.current, snapshot)) {
+      saveHistorySnapshot(lastSaved.current);
+    }
+    saveHistorySnapshot(snapshot);
     setFuture([]);
     setHasPendingHistoryChange(false);
     isHistoryAction.current = true;
-  }, [canvas, images, lines, texts]);
+  }, [canvas, images, lines, texts, saveHistorySnapshot]);
+
+  useEffect(() => {
+    const canUseCanvasClipboard = (event: ClipboardEvent): boolean =>
+      !event.defaultPrevented &&
+      !isEditorDialogOpen &&
+      !cropSession &&
+      !expansionDraft &&
+      !isTextEditingTarget(event.target);
+
+    const handleCopy = (event: ClipboardEvent) => {
+      if (!canUseCanvasClipboard(event) || tool !== 'select') return;
+      if (window.getSelection()?.isCollapsed === false) return;
+      const text = texts.find((element) => element.id === selectedId);
+      if (!text) return;
+      event.preventDefault();
+      void runWithFeedback(
+        () => {
+          if (!event.clipboardData) throw new Error('Clipboard access is unavailable.');
+          copyTextElement(event.clipboardData, text);
+          lastTextPasteRef.current = null;
+        },
+        {
+          success: 'Text layer copied. Paste to create a copy.',
+          error: 'The text layer could not be copied. Select it and try again.',
+        },
+      );
+    };
+
+    const handlePaste = (event: ClipboardEvent) => {
+      if (!canUseCanvasClipboard(event)) return;
+      event.preventDefault();
+      try {
+        if (!event.clipboardData) throw new Error('Clipboard access is unavailable.');
+        const serialized = event.clipboardData.getData(TEXT_ELEMENT_CLIPBOARD_TYPE);
+        if (serialized) {
+          const copiedText = readCopiedTextElement(serialized);
+          if (!copiedText) throw new Error('The copied text layer is invalid.');
+          if (!canvas) {
+            notify({
+              kind: 'error',
+              message: 'Open an image or start a blank meme before pasting a text layer.',
+            });
+            return;
+          }
+          const previousPaste = lastTextPasteRef.current;
+          const offset = previousPaste?.serialized === serialized ? previousPaste.offset + 20 : 20;
+          const topZIndex = Math.max(
+            0,
+            ...texts.map((text) => text.zIndex ?? 0),
+            ...images.map((image) => image.zIndex ?? 0),
+          );
+          const pastedText = createPastedTextElement(copiedText, offset, topZIndex + 1);
+          checkpointEditorHistory();
+          setTexts((current) => [...current, pastedText]);
+          setSelectedId(pastedText.id);
+          setTool('select');
+          lastTextPasteRef.current = { serialized, offset };
+          notify({ kind: 'success', message: 'Text layer pasted.' });
+          return;
+        }
+
+        const files = Array.from(event.clipboardData.items).filter((item) => item.kind === 'file');
+        if (files.length === 0) {
+          notify({
+            kind: 'error',
+            message:
+              'Paste an image or a copied MemeSquid text layer. To paste plain text, select a text layer and use its text field.',
+          });
+          return;
+        }
+        for (const item of files) {
+          const file = item.getAsFile();
+          if (!file) throw new Error('The clipboard image could not be read.');
+          loadImageFile(file);
+        }
+      } catch (error) {
+        console.error('Paste failed:', error);
+        notify({
+          kind: 'error',
+          message:
+            'The clipboard contents could not be pasted. Copy the image or text layer again and retry.',
+        });
+      }
+    };
+
+    window.addEventListener('copy', handleCopy);
+    window.addEventListener('paste', handlePaste);
+    return () => {
+      window.removeEventListener('copy', handleCopy);
+      window.removeEventListener('paste', handlePaste);
+    };
+  }, [
+    canvas,
+    checkpointEditorHistory,
+    cropSession,
+    expansionDraft,
+    images,
+    isEditorDialogOpen,
+    loadImageFile,
+    selectedId,
+    texts,
+    tool,
+    notify,
+    runWithFeedback,
+  ]);
 
   const applyCrop = useCallback(() => {
     if (!cropSession) return;
@@ -1730,6 +1961,7 @@ const App = () => {
     if (!cropSession) return;
 
     const handleCropKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isEditorDialogOpen) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         cancelCrop();
@@ -1745,7 +1977,7 @@ const App = () => {
 
     window.addEventListener('keydown', handleCropKeyDown);
     return () => window.removeEventListener('keydown', handleCropKeyDown);
-  }, [applyCrop, cancelCrop, cropSession]);
+  }, [applyCrop, cancelCrop, cropSession, isEditorDialogOpen]);
 
   const resizeCanvasTo = useCallback(
     (requestedWidth: number, requestedHeight: number, anchor: CanvasAnchor) => {
@@ -2007,9 +2239,14 @@ const App = () => {
     }
 
     if (tool === 'draw') {
-      isDrawing.current = true;
       const pos = getCanvasPointerPosition(event);
       if (!pos) return;
+      const snapshot = { canvas, texts, lines, images } satisfies EditorSnapshot;
+      if (!areEditorSnapshotsEqual(lastSaved.current, snapshot)) {
+        saveHistorySnapshot(lastSaved.current);
+        lastSaved.current = snapshot;
+      }
+      isDrawing.current = true;
       const lineId = `line-${crypto.randomUUID()}`;
       activeDrawLineIdRef.current = lineId;
       setLines((prev) => [
@@ -2027,29 +2264,13 @@ const App = () => {
 
   const handleMouseMove = (event: CanvasPointerEvent) => {
     updateBrushCursor(event);
-    if (tool !== 'draw' || !isDrawing.current) return;
+    const lineId = activeDrawLineIdRef.current;
+    if (tool !== 'draw' || !isDrawing.current || !lineId) return;
 
     const point = getCanvasPointerPosition(event);
     if (!point) return;
 
-    setLines((prev) => {
-      const newLines = [...prev];
-      const lastLine = { ...newLines[newLines.length - 1] };
-
-      const pts = lastLine.points;
-      const lastX = pts[pts.length - 2];
-      const lastY = pts[pts.length - 1];
-
-      // Smoothing: only add point if distance is greater than 5px
-      const dx = point.x - lastX;
-      const dy = point.y - lastY;
-      if (dx * dx + dy * dy >= 25) {
-        lastLine.points = lastLine.points.concat([point.x, point.y]);
-        newLines.splice(newLines.length - 1, 1, lastLine);
-        return newLines;
-      }
-      return prev;
-    });
+    setLines((current) => updateItemById(current, lineId, (line) => appendDrawPoint(line, point)));
   };
 
   const handleMouseUp = () => {
@@ -2057,9 +2278,12 @@ const App = () => {
       isDrawing.current = false;
       activeDrawLineIdRef.current = null;
       // Force history save immediately on mouse up for drawing
-      setPast((p) => [...p, lastSaved.current].slice(-50));
-      setFuture([]);
-      lastSaved.current = { canvas, texts, lines, images };
+      const snapshot = { canvas, texts, lines, images } satisfies EditorSnapshot;
+      if (!areEditorSnapshotsEqual(lastSaved.current, snapshot)) {
+        saveHistorySnapshot(lastSaved.current);
+        setFuture([]);
+        lastSaved.current = snapshot;
+      }
       setHasPendingHistoryChange(false);
     }
   };
@@ -2307,90 +2531,95 @@ const App = () => {
     (format: 'png' | 'jpeg' | 'webp' | 'clipboard') => {
       setSelectedId(null);
       setIsExportMenuOpen(false);
-      const runExport = async () => {
-        const stage = stageRef.current;
-        if (stage) {
-          const createExportUri = (mimeType: string) => {
-            if (mimeType !== 'image/jpeg' || canvas?.fill.type !== 'transparent') {
-              return stage.toDataURL({ mimeType, pixelRatio: 2 });
-            }
-
-            const renderedCanvas = stage.toCanvas({ pixelRatio: 2 });
-            const flattenedCanvas = document.createElement('canvas');
-            flattenedCanvas.width = renderedCanvas.width;
-            flattenedCanvas.height = renderedCanvas.height;
-            const context = flattenedCanvas.getContext('2d');
-            if (!context) return '';
-            context.fillStyle = '#ffffff';
-            context.fillRect(0, 0, flattenedCanvas.width, flattenedCanvas.height);
-            context.drawImage(renderedCanvas, 0, 0);
-            return flattenedCanvas.toDataURL(mimeType);
-          };
-
-          if (format === 'clipboard') {
-            try {
-              const uri = createExportUri('image/png');
-              const res = await fetch(uri);
-              const blob = await res.blob();
-              await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-              setAnnouncement('Meme copied to the clipboard.');
-            } catch (err) {
-              console.error('Failed to copy', err);
-              setAnnouncement('The meme could not be copied to the clipboard.');
-            }
-          } else {
-            const mimeType = `image/${format}`;
-            const uri = createExportUri(mimeType);
-            const link = document.createElement('a');
-            link.download = `memesquid-${new Date().toISOString().slice(0, 10)}.${format}`;
-            link.href = uri;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            setAnnouncement(`${format.toUpperCase()} download started.`);
-          }
-        }
-      };
+      // Allow selection handles to disappear before rendering the export.
       setTimeout(() => {
-        void runExport();
+        void runWithFeedback(
+          async () => {
+            const stage = stageRef.current;
+            if (!stage) throw new Error('There is no canvas to export.');
+            const mimeType = format === 'clipboard' ? 'image/png' : `image/${format}`;
+            let uri: string;
+            if (format === 'jpeg' && canvas?.fill.type === 'transparent') {
+              const renderedCanvas = stage.toCanvas({ pixelRatio: 2 });
+              const flattenedCanvas = document.createElement('canvas');
+              flattenedCanvas.width = renderedCanvas.width;
+              flattenedCanvas.height = renderedCanvas.height;
+              const context = flattenedCanvas.getContext('2d');
+              if (!context) throw new Error('The export canvas could not be created.');
+              context.fillStyle = '#ffffff';
+              context.fillRect(0, 0, flattenedCanvas.width, flattenedCanvas.height);
+              context.drawImage(renderedCanvas, 0, 0);
+              uri = flattenedCanvas.toDataURL(mimeType);
+            } else {
+              uri = stage.toDataURL({ mimeType, pixelRatio: 2 });
+            }
+
+            if (format === 'clipboard') {
+              if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+                throw new Error('Image clipboard access is unavailable.');
+              }
+              const response = await fetch(uri);
+              const blob = await response.blob();
+              await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+            } else {
+              downloadImage(uri, `memesquid-${new Date().toISOString().slice(0, 10)}.${format}`);
+            }
+          },
+          {
+            success:
+              format === 'clipboard'
+                ? 'Meme copied to the clipboard.'
+                : `${format.toUpperCase()} download started.`,
+            error:
+              format === 'clipboard'
+                ? 'The meme could not be copied. Try downloading it as PNG instead.'
+                : 'The meme could not be exported. Try again or choose another format.',
+          },
+        );
       }, 100);
     },
-    [canvas],
+    [canvas, runWithFeedback],
   );
 
-  const exportBackgroundRemovedPng = useCallback((image: ImageElement) => {
-    const width = image.image.width;
-    const height = image.image.height;
-    if (width === 0 || height === 0) {
-      setAnnouncement('The background-removed image is not ready to download.');
-      return;
-    }
+  const exportBackgroundRemovedPng = useCallback(
+    (image: ImageElement) => {
+      void runWithFeedback(
+        () => {
+          const width = image.image.width;
+          const height = image.image.height;
+          if (width === 0 || height === 0) throw new Error('The image is not ready to download.');
+          const imageCanvas = document.createElement('canvas');
+          imageCanvas.width = width;
+          imageCanvas.height = height;
+          const context = imageCanvas.getContext('2d');
+          if (!context) throw new Error('The export canvas could not be created.');
+          context.drawImage(image.image, 0, 0);
+          downloadImage(
+            imageCanvas.toDataURL('image/png'),
+            `background-removed-${new Date().toISOString().slice(0, 10)}.png`,
+          );
+        },
+        {
+          success: 'Transparent PNG download started.',
+          error: 'The transparent PNG could not be exported. Try again.',
+        },
+      );
+    },
+    [runWithFeedback],
+  );
 
-    const imageCanvas = document.createElement('canvas');
-    imageCanvas.width = width;
-    imageCanvas.height = height;
-    const context = imageCanvas.getContext('2d');
-    if (!context) {
-      setAnnouncement('The transparent PNG could not be created.');
-      return;
-    }
-
-    context.drawImage(image.image, 0, 0);
-    const link = document.createElement('a');
-    link.download = `background-removed-${new Date().toISOString().slice(0, 10)}.png`;
-    link.href = imageCanvas.toDataURL('image/png');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    setAnnouncement('Transparent PNG download started.');
-  }, []);
-
+  const feedbackNotice = <FeedbackNotice notice={notice} onDismiss={dismissNotice} />;
   const selectedText = texts.find((t) => t.id === selectedId);
   const selectedImage = images.find((i) => i.id === selectedId);
-  const firstImageLayer = images[0] ?? null;
   const isCanvasScrollable = Boolean(canvas && canvasZoom > fitZoom + 0.001);
-  const mobileControlsTitle =
-    tool === 'draw'
+  const cropSource = cropSession ? getCropSource(cropSession) : null;
+  const cropAspectRatio =
+    cropSession && cropSource ? getCropAspectRatio(cropSession.aspect, cropSource) : null;
+  const mobileControlsTitle = cropSession
+    ? cropSession.kind === 'canvas'
+      ? 'Crop canvas'
+      : 'Crop image'
+    : tool === 'draw'
       ? 'Draw'
       : selectedText
         ? 'Text'
@@ -2420,8 +2649,17 @@ const App = () => {
         {announcement}
       </div>
       {/* Header */}
-      <header className="safe-header relative z-[100] flex min-h-14 items-center justify-between border-b border-border bg-background/95 px-3 py-1.5 backdrop-blur-xl md:min-h-0 md:px-5 md:py-3">
-        <div className="flex items-center gap-3 min-w-0">
+      <header className="safe-header relative z-40 flex min-h-14 items-center justify-between border-b border-border bg-background/95 px-3 py-1.5 backdrop-blur-xl md:min-h-0 md:px-5 md:py-3">
+        <a
+          href="/"
+          aria-label="MemeSquid home"
+          onClick={(event) => {
+            if (!canvas) return;
+            event.preventDefault();
+            setIsStartOverOpen(true);
+          }}
+          className="flex min-w-0 items-center gap-3 rounded-xl focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
+        >
           <div className="flex h-9 w-9 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-xl bg-accent text-on-accent">
             <SquidMark className="h-8 w-8 md:h-9 md:w-9" />
           </div>
@@ -2436,7 +2674,7 @@ const App = () => {
               Free online meme editor
             </p>
           </div>
-        </div>
+        </a>
 
         {!canvas && (
           <button
@@ -2457,7 +2695,7 @@ const App = () => {
               disabled={Boolean(cropSession) || (past.length === 0 && !hasPendingHistoryChange)}
               aria-label="Undo last change"
               className="flex h-11 w-11 items-center justify-center text-content-muted hover:text-content-strong disabled:opacity-30 disabled:hover:text-content-muted transition-colors rounded-xl hover:bg-surface"
-              title="Undo (Ctrl+Z)"
+              title="Undo (Ctrl/Cmd Z)"
             >
               <Undo2 size={18} className="w-4 h-4 md:w-[18px] md:h-[18px]" />
             </button>
@@ -2467,66 +2705,11 @@ const App = () => {
               disabled={Boolean(cropSession) || future.length === 0}
               aria-label="Redo last change"
               className="flex h-11 w-11 items-center justify-center text-content-muted hover:text-content-strong disabled:opacity-30 disabled:hover:text-content-muted transition-colors rounded-xl hover:bg-surface"
-              title="Redo (Ctrl+Y)"
+              title="Redo (Ctrl/Cmd Shift Z or Ctrl Y)"
             >
               <Redo2 size={18} className="w-4 h-4 md:w-[18px] md:h-[18px]" />
             </button>
           </div>
-          {firstImageLayer && (
-            <button
-              type="button"
-              onClick={() => {
-                if (firstImageLayer.bgRemoved) {
-                  exportBackgroundRemovedPng(firstImageLayer);
-                } else {
-                  requestBackgroundRemoval(firstImageLayer.id);
-                }
-              }}
-              disabled={
-                Boolean(cropSession) ||
-                (!firstImageLayer.bgRemoved &&
-                  (bgRemovalState.status === 'downloading' ||
-                    bgRemovalState.status === 'processing'))
-              }
-              aria-label={
-                firstImageLayer.bgRemoved
-                  ? 'Download the first image layer as a transparent PNG'
-                  : bgRemovalState.status === 'downloading'
-                    ? `Downloading background removal model, ${bgRemovalState.progress} percent`
-                    : bgRemovalState.status === 'processing'
-                      ? 'Removing image background'
-                      : 'Remove background from the first image layer'
-              }
-              aria-busy={
-                bgRemovalState.status === 'downloading' || bgRemovalState.status === 'processing'
-              }
-              className="flex h-11 min-w-11 items-center justify-center gap-2 rounded-xl bg-surface px-3 text-xs font-extrabold text-content-strong transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50 md:px-4 md:text-sm"
-              title={
-                firstImageLayer.bgRemoved
-                  ? 'Download transparent PNG'
-                  : 'Remove background from first image'
-              }
-            >
-              {bgRemovalState.status === 'downloading' ? (
-                <Loader2 size={17} className="animate-spin text-accent" />
-              ) : bgRemovalState.status === 'processing' ? (
-                <Loader2 size={17} className="animate-spin text-accent" />
-              ) : firstImageLayer.bgRemoved ? (
-                <Download size={17} className="text-accent" />
-              ) : (
-                <Wand2 size={17} className="text-accent" />
-              )}
-              <span className="hidden sm:inline">
-                {bgRemovalState.status === 'downloading'
-                  ? `Downloading ${bgRemovalState.progress}%`
-                  : bgRemovalState.status === 'processing'
-                    ? 'Removing…'
-                    : firstImageLayer.bgRemoved
-                      ? 'Download PNG'
-                      : 'Remove BG'}
-              </span>
-            </button>
-          )}
           <div className="relative z-50">
             <div className="flex items-stretch h-11">
               <button
@@ -2557,7 +2740,7 @@ const App = () => {
                 aria-label="Choose export format"
                 aria-expanded={isExportMenuOpen}
                 aria-controls={isExportMenuOpen ? 'export-menu' : undefined}
-                className="bg-accent text-on-accent w-10 md:w-11 rounded-r-xl hover:bg-accent-hover transition-colors flex items-center justify-center h-full disabled:cursor-not-allowed disabled:opacity-40"
+                className="bg-accent text-on-accent w-11 rounded-r-xl hover:bg-accent-hover transition-colors flex items-center justify-center h-full disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <ChevronDown size={16} className="w-4 h-4" />
               </button>
@@ -2620,13 +2803,18 @@ const App = () => {
           </div>
         </div>
       </header>
+      {!isEditorDialogOpen && (
+        <div className="pointer-events-none fixed inset-x-3 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-[65] mx-auto max-w-md md:bottom-6 md:left-20 md:right-[21rem]">
+          {feedbackNotice}
+        </div>
+      )}
 
       <main className="flex flex-col md:flex-row flex-1 overflow-hidden relative">
         {/* Toolbar */}
         <aside
           role="group"
           aria-label="Editor tools"
-          className={`${canvas ? 'grid' : 'hidden'} mobile-toolbar z-20 order-2 w-full shrink-0 grid-cols-5 border-t border-border bg-background/90 backdrop-blur-xl md:order-1 md:flex md:h-auto md:w-16 md:flex-col md:items-center md:justify-start md:border-r md:border-t-0 md:bg-background/95 md:px-0 md:py-4`}
+          className={`${canvas ? 'grid' : 'hidden'} mobile-toolbar z-20 order-2 w-full shrink-0 grid-cols-5 border-t border-border bg-background/90 backdrop-blur-xl md:order-1 md:flex md:h-auto md:w-16 md:overflow-y-auto md:flex-col md:items-center md:justify-start md:border-r md:border-t-0 md:bg-background/95 md:px-0 md:py-4`}
         >
           <div className="contents md:flex md:flex-col md:items-center md:gap-4">
             <button
@@ -2654,19 +2842,32 @@ const App = () => {
               }}
               disabled={Boolean(cropSession)}
               aria-label="Select tool"
-              aria-pressed={tool === 'select'}
-              className={`hidden h-12 w-12 items-center justify-center rounded-xl transition-colors disabled:cursor-not-allowed disabled:opacity-40 md:order-1 md:flex ${tool === 'select' ? 'bg-accent text-on-accent' : 'bg-surface text-content-strong hover:bg-surface-hover'}`}
+              aria-pressed={tool === 'select' && !cropSession}
+              className={`hidden h-12 w-12 items-center justify-center rounded-xl transition-colors disabled:cursor-not-allowed disabled:opacity-40 md:order-1 md:flex ${tool === 'select' && !cropSession ? 'bg-accent text-on-accent' : 'bg-surface text-content-strong hover:bg-surface-hover'}`}
               title="Select Tool"
             >
               <MousePointer2 size={24} />
             </button>
             <button
               type="button"
+              onClick={() => {
+                if (cropSession) openMobileProps();
+                else beginCanvasCrop();
+              }}
+              aria-label={cropSession ? 'Crop settings' : 'Crop canvas'}
+              aria-pressed={Boolean(cropSession)}
+              className={`mobile-tab-item order-3 md:order-2 md:flex md:h-12 md:w-12 md:items-center md:justify-center md:rounded-xl md:transition-colors ${cropSession ? 'text-accent md:bg-accent md:text-on-accent' : 'text-content-muted md:bg-surface md:text-content-strong md:hover:bg-surface-hover'}`}
+              title={cropSession ? 'Crop settings' : 'Crop canvas'}
+            >
+              <CropIcon size={20} className="md:h-6 md:w-6" />
+              <span className="md:hidden">Crop</span>
+            </button>
+            <button
+              type="button"
               onClick={selectCanvas}
               disabled={!canvas || Boolean(cropSession)}
               aria-label="Canvas settings"
-              aria-pressed={tool === 'select' && selectedId === CANVAS_ID}
-              className={`hidden h-11 w-11 items-center justify-center rounded-xl transition-colors disabled:cursor-not-allowed disabled:opacity-40 md:order-2 md:flex md:h-12 md:w-12 ${tool === 'select' && selectedId === CANVAS_ID ? 'bg-accent text-on-accent' : 'bg-surface text-content-strong hover:bg-surface-hover'}`}
+              className="hidden h-12 w-12 items-center justify-center rounded-xl bg-surface text-content-strong transition-colors hover:bg-surface-hover disabled:opacity-40 md:order-5 md:flex"
               title="Canvas settings"
             >
               <LayoutPanelTop size={20} className="md:h-6 md:w-6" />
@@ -2677,7 +2878,7 @@ const App = () => {
                 setTool('draw');
                 setIsMobileAddOpen(false);
                 setIsMobileLayersOpen(false);
-                setIsMobilePropsOpen(true);
+                openMobileProps();
               }}
               disabled={Boolean(cropSession)}
               aria-label="Draw tool"
@@ -2702,27 +2903,20 @@ const App = () => {
               disabled={Boolean(cropSession)}
               aria-label="Add to meme"
               aria-expanded={isMobileAddOpen}
-              className="mobile-only-tab mobile-tab-item order-2 text-content-muted md:hidden"
+              className={`mobile-only-tab mobile-tab-item order-2 md:hidden ${isMobileAddOpen ? 'text-accent' : 'text-content-muted'}`}
             >
               <Plus size={21} />
               <span>Add</span>
             </button>
             <button
               type="button"
-              onClick={() => {
-                addText();
-                setTool('select');
-                setIsMobileAddOpen(false);
-                setIsMobileLayersOpen(false);
-                setIsMobilePropsOpen(true);
-              }}
+              onClick={addText}
               disabled={Boolean(cropSession)}
               aria-label="Add text"
-              className="mobile-tab-item order-3 text-content-muted md:order-6 md:flex md:h-12 md:w-12 md:items-center md:justify-center md:rounded-xl md:bg-surface md:text-content-strong md:transition-colors md:hover:bg-accent md:hover:text-on-accent"
+              className="hidden h-12 w-12 items-center justify-center rounded-xl bg-surface text-content-strong transition-colors hover:bg-accent hover:text-on-accent disabled:opacity-40 md:order-7 md:flex"
               title="Add Text"
             >
               <Type size={20} className="md:w-6 md:h-6" />
-              <span className="md:hidden">Text</span>
             </button>
             <button
               type="button"
@@ -2731,13 +2925,12 @@ const App = () => {
                 setTool('select');
                 setIsMobileAddOpen(false);
                 setIsMobileLayersOpen(false);
-                setIsMobilePropsOpen(true);
+                openMobileProps();
               }}
-              disabled={Boolean(cropSession)}
-              aria-label="Adjust selection"
+              aria-label={cropSession ? 'Crop settings' : 'Adjust selection'}
               aria-expanded={isMobilePropsOpen}
               aria-controls="meme-controls"
-              className={`mobile-only-tab mobile-tab-item order-5 md:hidden ${isMobilePropsOpen && tool === 'select' ? 'text-accent' : 'text-content-muted'}`}
+              className={`mobile-only-tab mobile-tab-item order-5 md:hidden ${isMobilePropsOpen ? 'text-accent' : 'text-content-muted'}`}
             >
               <Settings2 size={21} />
               <span>Adjust</span>
@@ -2748,7 +2941,7 @@ const App = () => {
               onClick={() => setIsTemplateLibraryOpen(true)}
               disabled={Boolean(cropSession)}
               aria-label="Browse meme templates"
-              className="hidden h-12 w-12 items-center justify-center rounded-xl bg-surface transition-colors hover:bg-accent hover:text-on-accent disabled:cursor-not-allowed disabled:opacity-40 md:order-5 md:flex"
+              className="hidden h-12 w-12 items-center justify-center rounded-xl bg-surface transition-colors hover:bg-accent hover:text-on-accent disabled:cursor-not-allowed disabled:opacity-40 md:order-6 md:flex"
               title="Templates"
             >
               <TemplateLibraryIcon size={24} />
@@ -2760,7 +2953,7 @@ const App = () => {
                 addImageInputRef.current?.click();
               }}
               disabled={Boolean(cropSession)}
-              className="hidden h-12 w-12 items-center justify-center rounded-xl bg-surface transition-colors hover:bg-accent hover:text-on-accent disabled:cursor-not-allowed disabled:opacity-40 md:order-7 md:flex"
+              className="hidden h-12 w-12 items-center justify-center rounded-xl bg-surface transition-colors hover:bg-accent hover:text-on-accent disabled:cursor-not-allowed disabled:opacity-40 md:order-8 md:flex"
               title="Add Image"
               aria-label="Add image"
             >
@@ -2828,15 +3021,13 @@ const App = () => {
                   >
                     <TemplateLibraryIcon size={17} /> Browse templates
                   </button>
-                  <label className="inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-[0.9rem] bg-content-strong px-5 py-3 text-sm font-extrabold text-on-accent transition-colors hover:bg-content md:min-h-11 md:rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => addImageInputRef.current?.click()}
+                    className="inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-[0.9rem] bg-content-strong px-5 py-3 text-sm font-extrabold text-on-accent transition-colors hover:bg-content md:min-h-11 md:rounded-xl"
+                  >
                     <ImageIcon size={17} /> Choose an image
-                    <input
-                      type="file"
-                      className="hidden"
-                      onChange={onFileUpload}
-                      accept={IMAGE_ACCEPT}
-                    />
-                  </label>
+                  </button>
                   <button
                     type="button"
                     onClick={createBlankCanvas}
@@ -2956,22 +3147,25 @@ const App = () => {
                           data={toKonvaElementData(element)}
                           isSelected={element.id === selectedId && tool === 'select'}
                           onSelect={(id: string) => {
-                            if (tool === 'select') setSelectedId(id);
+                            if (tool === 'select' && !cropSession) setSelectedId(id);
                           }}
                           onChange={updateImage}
                           tool={tool}
                           onFlip={flipImage}
                           onRemoveBackground={requestBackgroundRemoval}
                           onRestoreBackground={restoreImageBackground}
+                          onDownloadPng={exportBackgroundRemovedPng}
+                          canvasZoom={canvasZoom}
                           onDelete={deleteElement}
                           backgroundRemovalState={bgRemovalState}
+                          cropAspectRatio={cropAspectRatio}
                           cropDraft={
                             cropSession?.kind === 'image' && cropSession.targetId === element.id
                               ? cropSession.draft
                               : null
                           }
                           onBeginCrop={beginImageCrop}
-                          onCropDraftChange={updateImageCropDraft}
+                          onCropDraftChange={updateCropDraft}
                           onApplyCrop={applyCrop}
                           onCancelCrop={cancelCrop}
                           onResetCrop={resetCrop}
@@ -2982,7 +3176,7 @@ const App = () => {
                           data={toKonvaElementData(element)}
                           isSelected={element.id === selectedId && tool === 'select'}
                           onSelect={(id: string) => {
-                            if (tool === 'select') setSelectedId(id);
+                            if (tool === 'select' && !cropSession) setSelectedId(id);
                           }}
                           onChange={updateText}
                           tool={tool}
@@ -3006,7 +3200,8 @@ const App = () => {
                       <CanvasCropOverlay
                         canvas={canvas}
                         draft={cropSession.draft}
-                        onChange={updateCanvasCropDraft}
+                        onChange={updateCropDraft}
+                        aspectRatio={cropAspectRatio}
                       />
                     )}
                   </Layer>
@@ -3090,7 +3285,7 @@ const App = () => {
         {/* Mobile Overlay */}
         {isMobilePropsOpen && (
           <div
-            className="fixed inset-0 z-40 bg-overlay/55 backdrop-blur-[2px] md:hidden"
+            className="fixed inset-0 z-50 bg-overlay/55 backdrop-blur-[2px] md:hidden"
             onClick={closeMobileProps}
             aria-hidden="true"
           />
@@ -3107,7 +3302,7 @@ const App = () => {
           data-sheet-open={isMobilePropsOpen}
           data-sheet-dragging={mobilePropsSheetDrag.isDragging}
           style={getBottomSheetStyle(mobilePropsSheetDrag.dragOffset)}
-          className="mobile-bottom-sheet properties-panel fixed inset-x-0 bottom-0 z-50 order-3 flex max-h-[85dvh] w-full flex-col rounded-t-[1.75rem] border-t border-border bg-background shadow-2xl shadow-overlay/60 md:static md:max-h-none md:w-80 md:rounded-none md:border-l md:border-t-0 md:shadow-none"
+          className="mobile-bottom-sheet properties-panel fixed inset-x-0 bottom-0 z-[60] order-3 flex max-h-[85dvh] w-full flex-col rounded-t-[1.75rem] border-t border-border bg-background shadow-2xl shadow-overlay/60 md:static md:z-auto md:max-h-none md:w-80 md:rounded-none md:border-l md:border-t-0 md:shadow-none"
         >
           <BottomSheetDragHandle drag={mobilePropsSheetDrag} className="shrink-0 md:hidden" />
           <div className="flex items-center justify-between gap-2 border-b border-border px-4 pb-3 pt-1 md:p-4">
@@ -3122,7 +3317,7 @@ const App = () => {
             </div>
             <button
               aria-label="Close meme controls"
-              className="md:hidden flex h-11 w-11 items-center justify-center rounded-xl text-content-muted hover:bg-surface hover:text-content-strong"
+              className="dialog-close-button md:hidden"
               onClick={closeMobileProps}
             >
               <X size={20} />
@@ -3130,7 +3325,8 @@ const App = () => {
           </div>
 
           <div className="flex-1 overflow-y-auto p-5">
-            {canvas && (
+            {isMobilePropsOpen && feedbackNotice}
+            {canvas && !cropSession && (
               <MobileCanvasZoomSettings
                 zoom={canvasZoom}
                 isFit={isFitZoom}
@@ -3138,23 +3334,29 @@ const App = () => {
                 onFit={fitCanvasToViewport}
               />
             )}
-            {tool === 'draw' ? (
+            {cropSession && cropSource ? (
+              <CropProperties
+                aspect={cropSession.aspect}
+                draft={cropSession.draft}
+                source={cropSource}
+                minimumSize={cropSession.kind === 'canvas' ? MIN_CANVAS_SIZE : 1}
+                onAspectChange={changeCropAspect}
+                onClose={closeMobileProps}
+              />
+            ) : tool === 'draw' ? (
               <div className="space-y-8">
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 text-content-muted mb-2">
                     <PenTool size={14} />
                     <h3 className="text-xs font-semibold uppercase tracking-wider">
-                      Draw Settings
+                      Draw settings
                     </h3>
                   </div>
 
                   <div className="space-y-4">
                     <div className="space-y-1.5">
-                      <label
-                        htmlFor="brush-color"
-                        className="text-[10px] font-medium text-content-subtle uppercase"
-                      >
-                        Brush Color
+                      <label htmlFor="brush-color" className="field-label">
+                        Brush color
                       </label>
                       <ColorPicker
                         id="brush-color"
@@ -3166,13 +3368,13 @@ const App = () => {
 
                     <div className="space-y-1.5">
                       <div className="flex justify-between items-center">
-                        <label
-                          htmlFor="brush-size"
-                          className="text-[10px] font-medium text-content-subtle uppercase"
-                        >
-                          Brush Size
+                        <label htmlFor="brush-size" className="field-label">
+                          Brush size
                         </label>
-                        <output htmlFor="brush-size" className="text-[10px] text-content-muted">
+                        <output
+                          htmlFor="brush-size"
+                          className="text-xs tabular-nums text-content-muted"
+                        >
                           {drawWidth}px
                         </output>
                       </div>
@@ -3202,19 +3404,6 @@ const App = () => {
                   </div>
                 </div>
               </div>
-            ) : selectedId === CANVAS_ID && canvas && cropSession?.kind === 'canvas' ? (
-              <div className="space-y-4 rounded-2xl border border-accent/30 bg-accent/10 p-4 text-sm leading-relaxed text-content-secondary">
-                <div className="flex items-center gap-2 font-bold text-accent-hover">
-                  <CropIcon size={17} /> Canvas crop active
-                </div>
-                <p>
-                  Drag the crop frame and its handles on the canvas. Apply keeps cropped-away layers
-                  available outside the new boundary.
-                </p>
-                <p className="text-xs text-content-subtle">
-                  The add-space controls return after you apply or cancel.
-                </p>
-              </div>
             ) : selectedId === CANVAS_ID && canvas ? (
               <CanvasProperties
                 canvas={canvas}
@@ -3222,22 +3411,7 @@ const App = () => {
                 onAnchorChange={setCanvasResizeAnchor}
                 onResize={resizeCanvasTo}
                 onFillChange={updateCanvasFill}
-                onExpand={openExpansion}
-                onCrop={beginCanvasCrop}
               />
-            ) : cropSession?.kind === 'image' ? (
-              <div className="space-y-4 rounded-2xl border border-accent/30 bg-accent/10 p-4 text-sm leading-relaxed text-content-secondary">
-                <div className="flex items-center gap-2 font-bold text-accent-hover">
-                  <CropIcon size={17} /> Image crop active
-                </div>
-                <p>
-                  Drag the crop frame or use its handles. The dimmed source remains available until
-                  you apply.
-                </p>
-                <p className="text-xs text-content-subtle">
-                  Press Enter to apply or Escape to cancel.
-                </p>
-              </div>
             ) : selectedText ? (
               <div className="space-y-8">
                 {/* Content Section */}
@@ -3264,11 +3438,8 @@ const App = () => {
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5 col-span-2">
-                      <label
-                        htmlFor="text-font-family"
-                        className="text-[10px] font-medium text-content-subtle uppercase"
-                      >
-                        Font Family
+                      <label htmlFor="text-font-family" className="field-label">
+                        Font family
                       </label>
                       <div className="relative">
                         <select
@@ -3295,10 +3466,7 @@ const App = () => {
                       </div>
                     </div>
                     <div className="hidden space-y-1.5 md:block">
-                      <label
-                        htmlFor="text-font-size"
-                        className="text-[10px] font-medium text-content-subtle uppercase"
-                      >
+                      <label htmlFor="text-font-size" className="field-label">
                         Size
                       </label>
                       <input
@@ -3325,10 +3493,7 @@ const App = () => {
                       />
                     </div>
                     <div className="hidden space-y-1.5 md:block">
-                      <label
-                        htmlFor="text-stroke-width"
-                        className="text-[10px] font-medium text-content-subtle uppercase"
-                      >
+                      <label htmlFor="text-stroke-width" className="field-label">
                         Stroke
                       </label>
                       <input
@@ -3354,9 +3519,7 @@ const App = () => {
                       />
                     </div>
                     <div className="space-y-1.5 col-span-2">
-                      <span className="text-[10px] font-medium text-content-subtle uppercase">
-                        Style
-                      </span>
+                      <span className="field-label">Style</span>
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
@@ -3393,10 +3556,7 @@ const App = () => {
                   </div>
                   <div className="space-y-3">
                     <div className="space-y-1.5">
-                      <label
-                        htmlFor="text-fill-color"
-                        className="text-[10px] font-medium text-content-subtle uppercase"
-                      >
+                      <label htmlFor="text-fill-color" className="field-label">
                         Fill
                       </label>
                       <ColorPicker
@@ -3407,10 +3567,7 @@ const App = () => {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label
-                        htmlFor="text-outline-color"
-                        className="text-[10px] font-medium text-content-subtle uppercase"
-                      >
+                      <label htmlFor="text-outline-color" className="field-label">
                         Outline
                       </label>
                       <ColorPicker
@@ -3432,10 +3589,7 @@ const App = () => {
                   <div className="space-y-4">
                     <div className="space-y-3">
                       <div className="space-y-1.5">
-                        <label
-                          htmlFor="text-shadow-color"
-                          className="text-[10px] font-medium text-content-subtle uppercase"
-                        >
+                        <label htmlFor="text-shadow-color" className="field-label">
                           Color
                         </label>
                         <ColorPicker
@@ -3448,15 +3602,12 @@ const App = () => {
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1">
                           <div className="flex justify-between">
-                            <label
-                              htmlFor="text-shadow-blur"
-                              className="text-[10px] font-medium text-content-subtle uppercase"
-                            >
+                            <label htmlFor="text-shadow-blur" className="field-label">
                               Blur
                             </label>
                             <output
                               htmlFor="text-shadow-blur"
-                              className="text-[10px] text-content-muted"
+                              className="text-xs tabular-nums text-content-muted"
                             >
                               {round2(selectedText.shadowBlur || 0)}
                             </output>
@@ -3476,15 +3627,12 @@ const App = () => {
                         </div>
                         <div className="space-y-1">
                           <div className="flex justify-between">
-                            <label
-                              htmlFor="text-shadow-opacity"
-                              className="text-[10px] font-medium text-content-subtle uppercase"
-                            >
+                            <label htmlFor="text-shadow-opacity" className="field-label">
                               Opacity
                             </label>
                             <output
                               htmlFor="text-shadow-opacity"
-                              className="text-[10px] text-content-muted"
+                              className="text-xs tabular-nums text-content-muted"
                             >
                               {round2(selectedText.shadowOpacity ?? 1)}
                             </output>
@@ -3506,10 +3654,7 @@ const App = () => {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1.5">
-                        <label
-                          htmlFor="text-shadow-offset-x"
-                          className="text-[10px] font-medium text-content-subtle uppercase"
-                        >
+                        <label htmlFor="text-shadow-offset-x" className="field-label">
                           Offset X
                         </label>
                         <input
@@ -3524,10 +3669,7 @@ const App = () => {
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <label
-                          htmlFor="text-shadow-offset-y"
-                          className="text-[10px] font-medium text-content-subtle uppercase"
-                        >
+                        <label htmlFor="text-shadow-offset-y" className="field-label">
                           Offset Y
                         </label>
                         <input
@@ -3553,10 +3695,7 @@ const App = () => {
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label
-                        htmlFor="text-position-x"
-                        className="text-[10px] font-medium text-content-subtle uppercase"
-                      >
+                      <label htmlFor="text-position-x" className="field-label">
                         Position X
                       </label>
                       <input
@@ -3569,10 +3708,7 @@ const App = () => {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label
-                        htmlFor="text-position-y"
-                        className="text-[10px] font-medium text-content-subtle uppercase"
-                      >
+                      <label htmlFor="text-position-y" className="field-label">
                         Position Y
                       </label>
                       <input
@@ -3587,20 +3723,18 @@ const App = () => {
                       />
                     </div>
                     <div className="space-y-1.5 col-span-2">
-                      <p className="text-[10px] font-medium text-content-subtle uppercase">
-                        Align to Canvas
-                      </p>
+                      <p className="field-label">Align to canvas</p>
                       <CanvasAlignmentControl onAlign={alignElementToCanvas} />
                     </div>
                     <div className="space-y-1.5 col-span-2">
                       <div className="flex justify-between">
-                        <label
-                          htmlFor="text-rotation"
-                          className="text-[10px] font-medium text-content-subtle uppercase"
-                        >
+                        <label htmlFor="text-rotation" className="field-label">
                           Rotation
                         </label>
-                        <output htmlFor="text-rotation" className="text-[10px] text-content-muted">
+                        <output
+                          htmlFor="text-rotation"
+                          className="text-xs tabular-nums text-content-muted"
+                        >
                           {round2(selectedText.rotation || 0)}°
                         </output>
                       </div>
@@ -3624,7 +3758,7 @@ const App = () => {
                     onClick={deleteSelected}
                     className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-danger-strong/10 text-danger border border-danger-strong/20 hover:bg-danger-strong/20 hover:border-danger-strong/30 transition-colors font-medium text-sm"
                   >
-                    <Trash2 size={16} /> Delete Element
+                    <Trash2 size={16} /> Delete text
                   </button>
                 </div>
               </div>
@@ -3638,10 +3772,7 @@ const App = () => {
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label
-                        htmlFor="image-position-x"
-                        className="text-[10px] font-medium text-content-subtle uppercase"
-                      >
+                      <label htmlFor="image-position-x" className="field-label">
                         Position X
                       </label>
                       <input
@@ -3656,10 +3787,7 @@ const App = () => {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label
-                        htmlFor="image-position-y"
-                        className="text-[10px] font-medium text-content-subtle uppercase"
-                      >
+                      <label htmlFor="image-position-y" className="field-label">
                         Position Y
                       </label>
                       <input
@@ -3674,20 +3802,18 @@ const App = () => {
                       />
                     </div>
                     <div className="space-y-1.5 col-span-2">
-                      <p className="text-[10px] font-medium text-content-subtle uppercase">
-                        Align to Canvas
-                      </p>
+                      <p className="field-label">Align to canvas</p>
                       <CanvasAlignmentControl onAlign={alignElementToCanvas} />
                     </div>
                     <div className="space-y-1.5 col-span-2">
                       <div className="flex justify-between">
-                        <label
-                          htmlFor="image-rotation"
-                          className="text-[10px] font-medium text-content-subtle uppercase"
-                        >
+                        <label htmlFor="image-rotation" className="field-label">
                           Rotation
                         </label>
-                        <output htmlFor="image-rotation" className="text-[10px] text-content-muted">
+                        <output
+                          htmlFor="image-rotation"
+                          className="text-xs tabular-nums text-content-muted"
+                        >
                           {round2(selectedImage.rotation || 0)}°
                         </output>
                       </div>
@@ -3711,12 +3837,12 @@ const App = () => {
                     onClick={deleteSelected}
                     className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-danger-strong/10 text-danger border border-danger-strong/20 hover:bg-danger-strong/20 hover:border-danger-strong/30 transition-colors font-medium text-sm"
                   >
-                    <Trash2 size={16} /> Delete Element
+                    <Trash2 size={16} /> Delete image
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="h-full flex flex-col items-center justify-center text-content-subtle space-y-4 opacity-50">
+              <div className="h-full flex flex-col items-center justify-center text-content-muted space-y-4">
                 <Settings2 size={48} strokeWidth={1} />
                 <p className="text-sm text-center">
                   Select an element on the canvas
@@ -3736,6 +3862,7 @@ const App = () => {
         isOpen={isMobileLayersOpen}
         onClose={closeMobileLayers}
         dialogRef={mobileLayersDialogRef}
+        feedback={feedbackNotice}
       >
         <div className="max-h-[55dvh] overflow-y-auto rounded-2xl bg-surface">
           {allElements.length === 0 ? (
@@ -3752,12 +3879,13 @@ const App = () => {
                 <button
                   key={element.id}
                   type="button"
+                  aria-pressed={isSelected}
                   data-dialog-initial-focus={index === 0 ? true : undefined}
                   onClick={() => {
                     setSelectedId(element.id);
                     setTool('select');
                     closeMobileLayers();
-                    setIsMobilePropsOpen(true);
+                    openMobileProps();
                   }}
                   className={`flex min-h-14 w-full items-center gap-3 border-b border-border px-4 py-2 text-left last:border-b-0 ${isSelected ? 'bg-accent/15 text-accent-hover' : 'text-content-secondary'}`}
                 >
@@ -3785,11 +3913,25 @@ const App = () => {
         isOpen={isMobileAddOpen}
         onClose={closeMobileAdd}
         dialogRef={mobileAddDialogRef}
+        feedback={feedbackNotice}
       >
         <div className="overflow-hidden rounded-2xl bg-surface">
           <button
             type="button"
             data-dialog-initial-focus
+            onClick={addText}
+            className="mobile-sheet-action border-b border-border"
+          >
+            <span className="mobile-sheet-action-icon bg-accent/15 text-accent-hover">
+              <Type size={21} />
+            </span>
+            <span>
+              <strong>Add text</strong>
+              <small>Add a caption to your meme</small>
+            </span>
+          </button>
+          <button
+            type="button"
             onClick={() => {
               closeMobileAdd();
               setIsTemplateLibraryOpen(true);
@@ -3864,29 +4006,68 @@ const App = () => {
       {isTemplateLibraryOpen && (
         <React.Suspense
           fallback={
-            <div
-              className="fixed inset-0 z-[70] flex items-center justify-center bg-overlay/80 p-4"
-              role="status"
-              aria-live="polite"
-            >
-              <div className="flex items-center gap-3 rounded-2xl border border-border bg-background px-5 py-4 font-bold text-content-strong shadow-xl">
+            <div className="fixed inset-0 z-[70] flex flex-col items-center justify-center bg-overlay/80 p-4">
+              <div
+                role="status"
+                className="flex items-center gap-3 rounded-2xl border border-border bg-background px-5 py-4 font-bold text-content-strong shadow-xl"
+              >
                 <Loader2 size={20} className="animate-spin text-accent" /> Loading templates…
               </div>
+              <div className="max-w-md">{feedbackNotice}</div>
             </div>
           }
         >
           <TemplateLibraryDialog
             isOpen
             loadingTemplateId={loadingTemplateId}
+            feedback={feedbackNotice}
             onClose={closeTemplateLibrary}
             onSelect={(template) => void startWithTemplate(template)}
           />
         </React.Suspense>
       )}
 
+      {isStartOverOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-overlay/70 p-4">
+          <div
+            ref={startOverDialogRef}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="start-over-title"
+            aria-describedby="start-over-description"
+            tabIndex={-1}
+            className="dialog-panel relative w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-xl"
+          >
+            <h2 id="start-over-title" className="text-xl font-bold text-content-strong">
+              Delete this canvas and start over?
+            </h2>
+            {feedbackNotice}
+            <p id="start-over-description" className="mt-3 text-sm text-content-secondary">
+              Going home will delete your current canvas and all its edits. This cannot be undone.
+            </p>
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeStartOver}
+                data-dialog-initial-focus
+                className="min-h-11 rounded-xl border border-border px-4 py-2 text-sm font-bold text-content-strong transition-colors hover:bg-surface"
+              >
+                Cancel
+              </button>
+              <a
+                href="/"
+                className="flex min-h-11 items-center justify-center rounded-xl border border-danger-strong/30 bg-danger-strong/10 px-4 py-2 text-sm font-bold text-danger transition-colors hover:bg-danger-strong/20"
+              >
+                Delete and go home
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* About Modal */}
       {isAboutOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/70 p-4">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-overlay/70 p-4">
           <div
             ref={aboutDialogRef}
             role="dialog"
@@ -3894,17 +4075,17 @@ const App = () => {
             aria-labelledby="about-title"
             aria-describedby="about-description"
             tabIndex={-1}
-            className="bg-background border border-border rounded-2xl p-6 max-w-md w-full shadow-xl relative overflow-hidden"
+            className="dialog-panel bg-background border border-border rounded-2xl p-6 max-w-md w-full shadow-xl relative"
           >
             <button
               type="button"
               onClick={closeAbout}
               aria-label="Close About MemeSquid"
-              className="absolute top-2 right-2 flex h-11 w-11 items-center justify-center rounded-xl text-content-subtle hover:bg-surface hover:text-content-strong transition-colors"
+              className="dialog-close-button absolute top-2 right-2 z-10"
             >
               <X size={20} />
             </button>
-            <div className="relative flex items-center gap-3 mb-5">
+            <div className="relative flex items-center gap-3 mb-5 pr-6">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-accent text-on-accent">
                 <SquidMark className="h-10 w-10" />
               </div>
@@ -3920,6 +4101,7 @@ const App = () => {
                 </p>
               </div>
             </div>
+            {feedbackNotice}
             <div className="relative space-y-4 text-content-secondary text-sm leading-relaxed">
               <p id="about-description">
                 MemeSquid is a free browser-based editor for creating memes and reaction images.
@@ -3965,7 +4147,7 @@ const App = () => {
                   href="https://memesquid.com"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-content-muted hover:text-accent transition-colors"
+                  className="flex min-h-11 items-center gap-2 rounded-lg text-content-muted hover:text-accent transition-colors"
                 >
                   <Globe2 size={16} /> memesquid.com
                 </a>
@@ -3973,7 +4155,7 @@ const App = () => {
                   href="https://github.com/KyleTryon/Gemini-Meme-Generator"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-content-muted hover:text-accent transition-colors"
+                  className="flex min-h-11 items-center gap-2 rounded-lg text-content-muted hover:text-accent transition-colors"
                 >
                   <LinkIcon size={16} /> GitHub Repository
                 </a>
@@ -3981,7 +4163,7 @@ const App = () => {
                   href="https://x.com/TechSquidTV"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-content-muted hover:text-accent transition-colors"
+                  className="flex min-h-11 items-center gap-2 rounded-lg text-content-muted hover:text-accent transition-colors"
                 >
                   <LinkIcon size={16} /> @TechSquidTV
                 </a>
@@ -4012,7 +4194,7 @@ const App = () => {
               type="button"
               onClick={dismissInstallHelp}
               aria-label="Close install instructions"
-              className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-surface text-content-subtle transition-colors hover:text-content-strong md:right-2 md:top-2 md:h-11 md:w-11 md:rounded-xl md:bg-transparent md:hover:bg-surface"
+              className="dialog-close-button absolute right-3 top-3 bg-surface md:right-2 md:top-2 md:bg-transparent"
             >
               <X size={20} />
             </button>
@@ -4022,6 +4204,7 @@ const App = () => {
             <h2 id="install-help-title" className="pr-10 text-xl font-black text-content-strong">
               {isAppleMobile ? 'Add to Home Screen' : 'Install MemeSquid'}
             </h2>
+            {feedbackNotice}
             <div id="install-help-description">
               {isAppleMobile ? (
                 <ol className="mt-5 overflow-hidden rounded-2xl bg-surface text-sm leading-relaxed text-content-secondary">
@@ -4062,7 +4245,7 @@ const App = () => {
 
       {/* Background Removal Warning Modal */}
       {bgRemovalState.status === 'warning' && (
-        <div className="fixed inset-0 bg-overlay/80 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-overlay/80 z-[70] flex items-center justify-center p-4">
           <div
             ref={modelDownloadDialogRef}
             role="alertdialog"
@@ -4070,22 +4253,23 @@ const App = () => {
             aria-labelledby="model-download-title"
             aria-describedby="model-download-description"
             tabIndex={-1}
-            className="bg-background border border-border rounded-2xl p-6 max-w-md w-full shadow-xl relative"
+            className="dialog-panel bg-background border border-border rounded-2xl p-6 max-w-md w-full shadow-xl relative"
           >
             <button
               type="button"
               onClick={cancelModelDownload}
               aria-label="Cancel AI model download"
-              className="absolute top-2 right-2 flex h-11 w-11 items-center justify-center rounded-xl text-content-muted hover:bg-surface hover:text-content-strong transition-colors"
+              className="dialog-close-button absolute top-2 right-2"
             >
               <X size={20} />
             </button>
-            <div className="flex items-center gap-3 mb-4 text-accent">
+            <div className="flex items-center gap-3 mb-4 pr-8 text-accent">
               <Wand2 size={28} />
               <h2 id="model-download-title" className="text-xl font-bold text-content-strong">
-                Download AI Model?
+                Download background removal?
               </h2>
             </div>
+            {feedbackNotice}
             <p
               id="model-download-description"
               className="text-content-secondary mb-4 leading-relaxed"
@@ -4096,7 +4280,7 @@ const App = () => {
             <p className="text-content-muted text-sm mb-6">
               This only happens once. The model will be cached in your browser for future use.
             </p>
-            <div className="flex gap-3 justify-end">
+            <div className="flex flex-wrap gap-3 justify-end">
               <button
                 type="button"
                 data-dialog-initial-focus
@@ -4110,7 +4294,7 @@ const App = () => {
                 onClick={acceptModelDownload}
                 className="min-h-11 rounded-xl bg-accent px-4 text-sm font-bold text-on-accent hover:bg-accent-hover transition-colors"
               >
-                Download & Continue
+                Download and continue
               </button>
             </div>
           </div>
@@ -4140,7 +4324,7 @@ const MobileNumericControl = memo(
     return (
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] font-medium uppercase text-content-subtle">{label}</span>
+          <span className="field-label">{label}</span>
           <output
             className="text-sm font-extrabold tabular-nums text-content-strong"
             aria-live="polite"
@@ -4321,7 +4505,7 @@ const CropControlBar = memo(
       aria-label={ariaLabel}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
-      className={`flex w-max flex-wrap items-center justify-center gap-1 rounded-2xl border border-border bg-background/95 p-1.5 text-content-strong shadow-2xl shadow-overlay/50 backdrop-blur-md ${className}`}
+      className={`flex w-max max-w-full flex-wrap items-center justify-center gap-1 rounded-2xl border border-border bg-background/95 p-1.5 text-content-strong shadow-2xl shadow-overlay/50 backdrop-blur-md ${className}`}
     >
       <output className="whitespace-nowrap px-2 text-xs font-bold tabular-nums text-content-secondary">
         {label}
@@ -4358,122 +4542,138 @@ const CropControlBar = memo(
 );
 
 interface CanvasCropOverlayProps {
+  aspectRatio: number | null;
   canvas: CanvasState;
   draft: CropRect;
   onChange: (crop: CropRect) => void;
 }
 
-const CanvasCropOverlay = memo(({ canvas, draft, onChange }: CanvasCropOverlayProps) => {
-  const frameRef = useRef<Konva.Rect | null>(null);
-  const transformerRef = useRef<Konva.Transformer | null>(null);
-  const themeColors = getEditorThemeColors();
-  useSelectedTransformer(true, frameRef, transformerRef);
+const CanvasCropOverlay = memo(
+  ({ canvas, draft, onChange, aspectRatio }: CanvasCropOverlayProps) => {
+    const frameRef = useRef<Konva.Rect | null>(null);
+    const transformerRef = useRef<Konva.Transformer | null>(null);
+    const themeColors = getEditorThemeColors();
+    useSelectedTransformer(true, frameRef, transformerRef);
 
-  const commitFrame = useCallback(() => {
-    const frame = frameRef.current;
-    if (!frame) return;
+    const commitFrame = useCallback(() => {
+      const frame = frameRef.current;
+      if (!frame) return;
 
-    const crop = clampCropRect(
-      {
-        x: frame.x(),
-        y: frame.y(),
-        width: frame.width() * frame.scaleX(),
-        height: frame.height() * frame.scaleY(),
-      },
-      canvas,
-      MIN_CANVAS_SIZE,
+      const crop = fitCropToAspectRatio(
+        {
+          x: frame.x(),
+          y: frame.y(),
+          width: frame.width() * frame.scaleX(),
+          height: frame.height() * frame.scaleY(),
+        },
+        canvas,
+        aspectRatio,
+        MIN_CANVAS_SIZE,
+      );
+      frame.scaleX(1);
+      frame.scaleY(1);
+      if (crop) onChange(crop);
+    }, [canvas, onChange, aspectRatio]);
+
+    const right = draft.x + draft.width;
+    const bottom = draft.y + draft.height;
+
+    return (
+      <React.Fragment>
+        <Rect
+          x={0}
+          y={0}
+          width={canvas.width}
+          height={draft.y}
+          fill={themeColors.canvasDim}
+          listening={false}
+        />
+        <Rect
+          x={0}
+          y={bottom}
+          width={canvas.width}
+          height={Math.max(0, canvas.height - bottom)}
+          fill={themeColors.canvasDim}
+          listening={false}
+        />
+        <Rect
+          x={0}
+          y={draft.y}
+          width={draft.x}
+          height={draft.height}
+          fill={themeColors.canvasDim}
+          listening={false}
+        />
+        <Rect
+          x={right}
+          y={draft.y}
+          width={Math.max(0, canvas.width - right)}
+          height={draft.height}
+          fill={themeColors.canvasDim}
+          listening={false}
+        />
+        <Rect
+          ref={frameRef}
+          x={draft.x}
+          y={draft.y}
+          width={draft.width}
+          height={draft.height}
+          fill="rgba(255,255,255,0.001)"
+          stroke={themeColors.accent}
+          strokeWidth={2}
+          draggable
+          dragBoundFunc={(position) => ({
+            x: Math.min(Math.max(0, position.x), canvas.width - draft.width),
+            y: Math.min(Math.max(0, position.y), canvas.height - draft.height),
+          })}
+          onDragMove={commitFrame}
+          onDragEnd={commitFrame}
+          onTransformEnd={commitFrame}
+        />
+        <Transformer
+          ref={transformerRef}
+          anchorSize={TRANSFORMER_ANCHOR_SIZE}
+          rotateEnabled={false}
+          flipEnabled={false}
+          ignoreStroke
+          keepRatio={aspectRatio !== null}
+          shiftBehavior="none"
+          enabledAnchors={aspectRatio !== null ? CROP_CORNER_ANCHORS : undefined}
+          borderStroke={themeColors.accent}
+          anchorStroke={themeColors.onAccent}
+          anchorFill={themeColors.accent}
+          boundBoxFunc={(previousBox, nextBox) => {
+            if (
+              Math.abs(nextBox.width) < MIN_CANVAS_SIZE ||
+              Math.abs(nextBox.height) < MIN_CANVAS_SIZE
+            ) {
+              return previousBox;
+            }
+            if (aspectRatio !== null) {
+              return nextBox.x < 0 ||
+                nextBox.y < 0 ||
+                nextBox.x + nextBox.width > canvas.width ||
+                nextBox.y + nextBox.height > canvas.height
+                ? previousBox
+                : nextBox;
+            }
+            const crop = clampCropRect(
+              {
+                x: nextBox.x,
+                y: nextBox.y,
+                width: nextBox.width,
+                height: nextBox.height,
+              },
+              canvas,
+              MIN_CANVAS_SIZE,
+            );
+            return { ...nextBox, ...crop, rotation: 0 };
+          }}
+        />
+      </React.Fragment>
     );
-    frame.scaleX(1);
-    frame.scaleY(1);
-    onChange(crop);
-  }, [canvas, onChange]);
-
-  const right = draft.x + draft.width;
-  const bottom = draft.y + draft.height;
-
-  return (
-    <React.Fragment>
-      <Rect
-        x={0}
-        y={0}
-        width={canvas.width}
-        height={draft.y}
-        fill={themeColors.canvasDim}
-        listening={false}
-      />
-      <Rect
-        x={0}
-        y={bottom}
-        width={canvas.width}
-        height={Math.max(0, canvas.height - bottom)}
-        fill={themeColors.canvasDim}
-        listening={false}
-      />
-      <Rect
-        x={0}
-        y={draft.y}
-        width={draft.x}
-        height={draft.height}
-        fill={themeColors.canvasDim}
-        listening={false}
-      />
-      <Rect
-        x={right}
-        y={draft.y}
-        width={Math.max(0, canvas.width - right)}
-        height={draft.height}
-        fill={themeColors.canvasDim}
-        listening={false}
-      />
-      <Rect
-        ref={frameRef}
-        x={draft.x}
-        y={draft.y}
-        width={draft.width}
-        height={draft.height}
-        fill="rgba(255,255,255,0.001)"
-        stroke={themeColors.accent}
-        strokeWidth={2}
-        draggable
-        dragBoundFunc={(position) => ({
-          x: Math.min(Math.max(0, position.x), canvas.width - draft.width),
-          y: Math.min(Math.max(0, position.y), canvas.height - draft.height),
-        })}
-        onDragMove={commitFrame}
-        onDragEnd={commitFrame}
-        onTransformEnd={commitFrame}
-      />
-      <Transformer
-        ref={transformerRef}
-        anchorSize={TRANSFORMER_ANCHOR_SIZE}
-        rotateEnabled={false}
-        flipEnabled={false}
-        borderStroke={themeColors.accent}
-        anchorStroke={themeColors.onAccent}
-        anchorFill={themeColors.accent}
-        boundBoxFunc={(previousBox, nextBox) => {
-          if (
-            Math.abs(nextBox.width) < MIN_CANVAS_SIZE ||
-            Math.abs(nextBox.height) < MIN_CANVAS_SIZE
-          ) {
-            return previousBox;
-          }
-          const crop = clampCropRect(
-            {
-              x: nextBox.x,
-              y: nextBox.y,
-              width: nextBox.width,
-              height: nextBox.height,
-            },
-            canvas,
-            MIN_CANVAS_SIZE,
-          );
-          return { ...nextBox, ...crop, rotation: 0 };
-        }}
-      />
-    </React.Fragment>
-  );
-});
+  },
+);
 
 interface CanvasEdgeControlsProps {
   canvas: CanvasState;
@@ -4683,7 +4883,7 @@ const CanvasExpansionPreview = memo(
             <button
               type="button"
               onClick={onCancel}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-content-muted transition-colors hover:bg-surface hover:text-content-strong"
+              className="dialog-close-button"
               aria-label="Cancel canvas expansion"
             >
               <X size={17} />
@@ -4786,12 +4986,17 @@ const CanvasDimensionInput = ({ label, value, onCommit }: CanvasDimensionInputPr
 
   const commit = () => {
     const parsed = Number(inputValue);
-    if (Number.isFinite(parsed)) onCommit(parsed);
-    else setInputValue(String(Math.round(value)));
+    if (!inputValue.trim() || !Number.isFinite(parsed)) {
+      setInputValue(String(Math.round(value)));
+      return;
+    }
+    const next = Math.min(MAX_CANVAS_SIZE, Math.max(MIN_CANVAS_SIZE, Math.round(parsed)));
+    setInputValue(String(next));
+    onCommit(next);
   };
 
   return (
-    <label className="space-y-1.5 text-[10px] font-medium uppercase text-content-subtle">
+    <label className="space-y-1.5 field-label">
       {label}
       <input
         type="number"
@@ -4815,53 +5020,38 @@ interface CanvasPropertiesProps {
   onAnchorChange: (anchor: CanvasAnchor) => void;
   onResize: (width: number, height: number, anchor: CanvasAnchor) => void;
   onFillChange: (fill: CanvasFill) => void;
-  onExpand: (side: CanvasSide) => void;
-  onCrop: () => void;
 }
 
 const CanvasProperties = memo(
-  ({
-    canvas,
-    anchor,
-    onAnchorChange,
-    onResize,
-    onFillChange,
-    onExpand,
-    onCrop,
-  }: CanvasPropertiesProps) => (
+  ({ canvas, anchor, onAnchorChange, onResize, onFillChange }: CanvasPropertiesProps) => (
     <div className="space-y-8">
       <section className="space-y-4">
         <div className="flex items-center gap-2 text-content-muted">
           <LayoutPanelTop size={14} />
-          <h3 className="text-xs font-semibold uppercase tracking-wider">Canvas</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wider">Size</h3>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <CanvasDimensionInput
             key={`width-${canvas.width}`}
-            label="Width"
+            label="Width (px)"
             value={canvas.width}
             onCommit={(width) => onResize(width, canvas.height, anchor)}
           />
           <CanvasDimensionInput
             key={`height-${canvas.height}`}
-            label="Height"
+            label="Height (px)"
             value={canvas.height}
             onCommit={(height) => onResize(canvas.width, height, anchor)}
           />
         </div>
-        <button
-          type="button"
-          onClick={onCrop}
-          className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-accent/40 bg-accent/10 px-4 text-sm font-bold text-accent-hover transition-colors hover:border-accent-hover hover:bg-accent/15"
-        >
-          <CropIcon size={17} /> Crop canvas
-        </button>
-        <div>
-          <p className="mb-2 text-[10px] font-medium uppercase text-content-subtle">
-            Resize anchor
-          </p>
+        <details className="group rounded-xl border border-border px-3">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 text-xs font-semibold text-content-muted [&::-webkit-details-marker]:hidden">
+            Resize options{' '}
+            <ChevronDown size={16} className="transition-transform group-open:rotate-180" />
+          </summary>
+          <p className="mb-2 field-label">Anchor</p>
           <div
-            className="grid w-fit grid-cols-3 gap-2"
+            className="mb-3 grid w-fit grid-cols-3 gap-2"
             role="group"
             aria-label="Canvas resize anchor"
           >
@@ -4879,33 +5069,7 @@ const CanvasProperties = memo(
               </button>
             ))}
           </div>
-        </div>
-        <div>
-          <p className="mb-2 text-[10px] font-medium uppercase text-content-subtle">Presets</p>
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={() => onResize(canvas.width, canvas.width, anchor)}
-              className="min-h-11 rounded-xl border border-border bg-canvas/50 text-xs font-bold text-content-secondary transition-colors hover:border-accent-hover hover:text-accent-hover"
-            >
-              1:1
-            </button>
-            <button
-              type="button"
-              onClick={() => onResize(canvas.width, Math.round((canvas.width * 9) / 16), anchor)}
-              className="min-h-11 rounded-xl border border-border bg-canvas/50 text-xs font-bold text-content-secondary transition-colors hover:border-accent-hover hover:text-accent-hover"
-            >
-              16:9
-            </button>
-            <button
-              type="button"
-              onClick={() => onResize(canvas.width, Math.round((canvas.width * 5) / 4), anchor)}
-              className="min-h-11 rounded-xl border border-border bg-canvas/50 text-xs font-bold text-content-secondary transition-colors hover:border-accent-hover hover:text-accent-hover"
-            >
-              4:5
-            </button>
-          </div>
-        </div>
+        </details>
       </section>
 
       <section className="space-y-4">
@@ -4943,55 +5107,6 @@ const CanvasProperties = memo(
             ariaLabel="Canvas background color"
           />
         )}
-        {canvas.fill.type === 'transparent' && (
-          <p className="text-xs leading-relaxed text-content-subtle">
-            PNG and WebP preserve transparency. JPEG exports transparent areas as white.
-          </p>
-        )}
-      </section>
-
-      <section className="space-y-4">
-        <div className="flex items-center gap-2 text-content-muted">
-          <Plus size={14} />
-          <h3 className="text-xs font-semibold uppercase tracking-wider">Add space</h3>
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-          <span />
-          <button
-            type="button"
-            onClick={() => onExpand('top')}
-            className="min-h-11 rounded-xl border border-border text-xs font-bold text-content-secondary transition-colors hover:border-accent-hover hover:text-accent-hover"
-          >
-            Above
-          </button>
-          <span />
-          <button
-            type="button"
-            onClick={() => onExpand('left')}
-            className="min-h-11 rounded-xl border border-border text-xs font-bold text-content-secondary transition-colors hover:border-accent-hover hover:text-accent-hover"
-          >
-            Left
-          </button>
-          <span className="flex items-center justify-center text-[10px] font-bold uppercase text-content-subtle">
-            Canvas
-          </span>
-          <button
-            type="button"
-            onClick={() => onExpand('right')}
-            className="min-h-11 rounded-xl border border-border text-xs font-bold text-content-secondary transition-colors hover:border-accent-hover hover:text-accent-hover"
-          >
-            Right
-          </button>
-          <span />
-          <button
-            type="button"
-            onClick={() => onExpand('bottom')}
-            className="min-h-11 rounded-xl border border-border text-xs font-bold text-content-secondary transition-colors hover:border-accent-hover hover:text-accent-hover"
-          >
-            Below
-          </button>
-          <span />
-        </div>
       </section>
     </div>
   ),
@@ -5127,7 +5242,7 @@ const BackgroundRemovalButton = memo(
           image.bgRemoved ? onRestoreBackground(image.id) : onRemoveBackground(image.id)
         }
         disabled={!image.bgRemoved && isBusy}
-        className="flex min-h-11 items-center gap-2 whitespace-nowrap rounded-xl px-3 text-sm font-semibold text-content-strong hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-accent/10 px-3 text-xs font-bold text-accent-hover hover:bg-accent/20 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
         aria-label={
           image.bgRemoved
             ? 'Restore image background'
@@ -5146,19 +5261,19 @@ const BackgroundRemovalButton = memo(
       >
         {isDownloading ? (
           <>
-            <Loader2 size={17} className="animate-spin text-accent" /> Downloading {progress}%
+            <Loader2 size={18} className="animate-spin" /> Downloading {progress}%
           </>
         ) : isProcessing ? (
           <>
-            <Loader2 size={17} className="animate-spin text-accent" /> Removing…
+            <Loader2 size={18} className="animate-spin" /> Removing…
           </>
         ) : image.bgRemoved ? (
           <>
-            <RotateCcw size={17} className="text-accent" /> Restore BG
+            <RotateCcw size={18} /> Restore background
           </>
         ) : (
           <>
-            <Wand2 size={17} className="text-accent" /> Remove BG
+            <Wand2 size={18} /> Remove background
           </>
         )}
       </button>
@@ -5171,6 +5286,7 @@ interface ImageContextualControlsProps extends BackgroundRemovalButtonProps {
   onFlip: (id: string, axis: TransformAxis) => void;
   onCrop: (id: string) => void;
   onDelete: (id: string) => void;
+  onDownloadPng: (image: ImageElement) => void;
 }
 
 const ImageContextualControls = memo(
@@ -5182,6 +5298,7 @@ const ImageContextualControls = memo(
     onRemoveBackground,
     onRestoreBackground,
     onDelete,
+    onDownloadPng,
   }: ImageContextualControlsProps) => {
     return (
       <div
@@ -5192,45 +5309,59 @@ const ImageContextualControls = memo(
         style={{ maxWidth: 'inherit' }}
         className="flex w-max flex-wrap items-center justify-center gap-1 rounded-2xl border border-border bg-background/95 p-1.5 text-content-strong shadow-2xl shadow-overlay/50 backdrop-blur-md"
       >
-        <ImageFlipButtons imageId={image.id} onFlip={onFlip} />
-        <button
-          type="button"
-          onClick={() => onCrop(image.id)}
-          className={IMAGE_ACTION_ICON_BUTTON_CLASS}
-          aria-label="Crop image"
-          title="Crop image"
-        >
-          <CropIcon size={18} />
-        </button>
-        <div className="mx-0.5 h-7 w-px bg-surface-hover" aria-hidden="true" />
         <BackgroundRemovalButton
           image={image}
           backgroundRemovalState={backgroundRemovalState}
           onRemoveBackground={onRemoveBackground}
           onRestoreBackground={onRestoreBackground}
         />
-        <div className="mx-0.5 h-7 w-px bg-surface-hover" aria-hidden="true" />
-        <button
-          type="button"
-          onClick={() => onDelete(image.id)}
-          className={`${IMAGE_ACTION_ICON_BUTTON_CLASS} text-danger hover:bg-danger-strong/15 hover:text-danger-hover`}
-          aria-label="Delete image"
-          title="Delete image"
-        >
-          <Trash2 size={18} />
-        </button>
+        {image.bgRemoved && (
+          <button
+            type="button"
+            onClick={() => onDownloadPng(image)}
+            className="flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-surface px-3 text-xs font-bold text-content-strong transition-colors hover:bg-surface-hover"
+            aria-label="Download selected image as a transparent PNG"
+            title="Download selected image as a transparent PNG"
+          >
+            <Download size={18} /> Download PNG
+          </button>
+        )}
+        <div className="flex items-center gap-1">
+          <ImageFlipButtons imageId={image.id} onFlip={onFlip} />
+          <button
+            type="button"
+            onClick={() => onCrop(image.id)}
+            className={IMAGE_ACTION_ICON_BUTTON_CLASS}
+            aria-label="Crop image"
+            title="Crop image"
+          >
+            <CropIcon size={18} />
+          </button>
+          <div className="mx-0.5 h-7 w-px bg-border" aria-hidden="true" />
+          <button
+            type="button"
+            onClick={() => onDelete(image.id)}
+            className={`${IMAGE_ACTION_ICON_BUTTON_CLASS} text-danger hover:bg-danger-strong/15 hover:text-danger-hover`}
+            aria-label="Delete image"
+            title="Delete image"
+          >
+            <Trash2 size={18} />
+          </button>
+        </div>
       </div>
     );
   },
 );
 
 interface ImageElementItemProps extends Omit<ImageContextualControlsProps, 'image' | 'onCrop'> {
+  canvasZoom: number;
   data: ImageElement;
   isSelected: boolean;
   onSelect: (id: string) => void;
   onChange: (id: string, attrs: ItemPatch<ImageElement>) => void;
   tool: EditorTool;
   cropDraft: CropRect | null;
+  cropAspectRatio: number | null;
   onBeginCrop: (id: string) => void;
   onCropDraftChange: (crop: CropRect) => void;
   onApplyCrop: () => void;
@@ -5249,8 +5380,11 @@ const ImageElementItem = memo(
     onRemoveBackground,
     onRestoreBackground,
     onDelete,
+    onDownloadPng,
+    canvasZoom,
     backgroundRemovalState,
     cropDraft,
+    cropAspectRatio,
     onBeginCrop,
     onCropDraftChange,
     onApplyCrop,
@@ -5278,27 +5412,23 @@ const ImageElementItem = memo(
       if (!node || !toolbar || !stage) return;
 
       const bounds = node.getClientRect({ relativeTo: stage });
-      const edgePadding = 8;
-      const toolbarWidth = Math.min(
-        toolbar.offsetWidth,
-        Math.max(stage.width() - edgePadding * 2, 0),
+      const visibleWidth = stage.width() * canvasZoom;
+      const visibleHeight = stage.height() * canvasZoom;
+      // Measure after wrapping; controls retain their normal touch size at every zoom.
+      toolbar.style.maxWidth = `${Math.max(visibleWidth - 16, 0)}px`;
+      toolbar.style.maxHeight = `${Math.max(visibleHeight - 16, 0)}px`;
+      const position = getImageActionsPosition(
+        {
+          x: bounds.x * canvasZoom,
+          y: bounds.y * canvasZoom,
+          width: bounds.width * canvasZoom,
+          height: bounds.height * canvasZoom,
+        },
+        { width: toolbar.offsetWidth, height: toolbar.offsetHeight },
+        { width: visibleWidth, height: visibleHeight },
       );
-      const centerX = bounds.x + bounds.width / 2;
-      const x =
-        toolbarWidth + edgePadding * 2 >= stage.width()
-          ? stage.width() / 2
-          : Math.min(
-              stage.width() - toolbarWidth / 2 - edgePadding,
-              Math.max(toolbarWidth / 2 + edgePadding, centerX),
-            );
-      const placeBelow =
-        bounds.y + bounds.height + toolbar.offsetHeight + 12 <= stage.height() ||
-        bounds.y < toolbar.offsetHeight + 12;
-      const y = placeBelow ? bounds.y + bounds.height + 12 : bounds.y - 12;
-
-      toolbar.style.maxWidth = `${Math.max(stage.width() - edgePadding * 2, 0)}px`;
-      toolbar.style.transform = `translate(${x}px, ${y}px) translate(-50%, ${placeBelow ? '0' : '-100%'})`;
-    }, []);
+      toolbar.style.transform = `translate(${position.x / canvasZoom}px, ${position.y / canvasZoom}px) scale(${1 / canvasZoom})`;
+    }, [canvasZoom]);
 
     const setHtmlDivRef = useCallback(
       (node: HTMLDivElement | null) => {
@@ -5323,6 +5453,7 @@ const ImageElementItem = memo(
       data.scaleX,
       data.scaleY,
       data.rotation,
+      data.bgRemoved,
       isSelected,
       updateHtmlPos,
     ]);
@@ -5349,18 +5480,29 @@ const ImageElementItem = memo(
       const sourcePerLocalX = sourceSize.width / fullImage.width();
       const sourcePerLocalY = sourceSize.height / fullImage.height();
 
-      onCropDraftChange(
-        clampCropRect(
-          {
-            x: localLeft * sourcePerLocalX,
-            y: localTop * sourcePerLocalY,
-            width: (localRight - localLeft) * sourcePerLocalX,
-            height: (localBottom - localTop) * sourcePerLocalY,
-          },
-          sourceSize,
-        ),
+      const fitted = fitCropToAspectRatio(
+        {
+          x: localLeft * sourcePerLocalX,
+          y: localTop * sourcePerLocalY,
+          width: (localRight - localLeft) * sourcePerLocalX,
+          height: (localBottom - localTop) * sourcePerLocalY,
+        },
+        sourceSize,
+        cropAspectRatio,
       );
-    }, [onCropDraftChange, sourceSize]);
+      if (!fitted) return;
+      const preview = applyImageCrop(data, fitted);
+      frame.setAttrs({
+        x: preview.x,
+        y: preview.y,
+        width: preview.width,
+        height: preview.height,
+        scaleX: preview.scaleX ?? 1,
+        scaleY: preview.scaleY ?? 1,
+        rotation: preview.rotation ?? 0,
+      });
+      onCropDraftChange(fitted);
+    }, [onCropDraftChange, sourceSize, cropAspectRatio, data]);
 
     return (
       <React.Fragment>
@@ -5416,7 +5558,10 @@ const ImageElementItem = memo(
               anchorSize={TRANSFORMER_ANCHOR_SIZE}
               rotateEnabled={false}
               flipEnabled={false}
-              keepRatio={false}
+              ignoreStroke
+              keepRatio={cropAspectRatio !== null}
+              shiftBehavior="none"
+              enabledAnchors={cropAspectRatio !== null ? CROP_CORNER_ANCHORS : undefined}
               borderStroke={themeColors.accent}
               anchorStroke={themeColors.onAccent}
               anchorFill={themeColors.accent}
@@ -5471,7 +5616,7 @@ const ImageElementItem = memo(
             <div
               ref={setHtmlDivRef}
               style={{ position: 'absolute', top: 0, left: 0, transformOrigin: 'top left' }}
-              className="flex items-center justify-center leading-normal"
+              className="flex w-max items-start overflow-auto rounded-2xl leading-normal"
             >
               {cropDraft ? (
                 <CropControlBar
@@ -5490,6 +5635,7 @@ const ImageElementItem = memo(
                   onRemoveBackground={onRemoveBackground}
                   onRestoreBackground={onRestoreBackground}
                   onDelete={onDelete}
+                  onDownloadPng={onDownloadPng}
                 />
               )}
             </div>

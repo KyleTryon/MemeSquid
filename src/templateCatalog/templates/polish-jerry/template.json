@@ -1,0 +1,19 @@
+{
+  "id": "polish-jerry",
+  "title": "Polish Jerry",
+  "aliases": ["Confused Jerry", "WTF Jerry"],
+  "tags": ["confusion", "jerry", "reaction"],
+  "groupIds": ["tom-and-jerry"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "96725881",
+      "url": "https://imgflip.com/memetemplate/96725881/Polish-Jerry"
+    },
+    {
+      "kind": "source",
+      "url": "https://www.reddit.com/r/MemeRestoration/comments/eyvwpu/tried_to_upscale_and_clean_the_original_polish/"
+    }
+  ],
+  "image": { "width": 2400, "height": 1800 }
+}

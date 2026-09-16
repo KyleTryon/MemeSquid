@@ -1,0 +1,19 @@
+{
+  "id": "uno-draw-25-cards",
+  "title": "UNO Draw 25 Cards",
+  "aliases": ["Do Something or Draw 25", "Draw 25", "UNO Dilemma"],
+  "tags": ["cards", "choice", "refusal"],
+  "groupIds": ["uno"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "217743513",
+      "url": "https://imgflip.com/memetemplate/217743513/UNO-Draw-25-Cards"
+    },
+    {
+      "kind": "source",
+      "url": "https://www.reddit.com/r/MemeRestoration/comments/en1xrv/a_slightly_better_and_cleaner_draw_25_template/"
+    }
+  ],
+  "image": { "width": 2400, "height": 1600 }
+}
