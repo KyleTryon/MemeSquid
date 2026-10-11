@@ -11,11 +11,3 @@ createRoot(rootElement).render(
     <App />
   </StrictMode>,
 );
-
-if (import.meta.env.PROD && 'serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    void navigator.serviceWorker.register('./sw.js').catch(() => {
-      console.error('MemeSquid could not enable offline mode.');
-    });
-  });
-}
