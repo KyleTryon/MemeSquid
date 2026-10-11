@@ -18,7 +18,7 @@ export function buildServiceWorker(assets: readonly AppAsset[]): string {
   for (const asset of cachedAssets) digest.update(asset.fileName).update(asset.source);
 
   const cacheName = `memesquid-app-${digest.digest('hex').slice(0, 16)}`;
-  const urls = ['./', ...cachedAssets.map((asset) => `./${asset.fileName}`)];
+  const urls = cachedAssets.map((asset) => `./${asset.fileName}`);
   return `const CACHE_NAME = ${JSON.stringify(cacheName)};\nconst PRECACHE_ASSETS = ${JSON.stringify(urls)};\n${workerSource}`;
 }
 
@@ -28,6 +28,10 @@ export function offlineAppPlugin(): Plugin {
   return {
     name: 'memesquid-offline-app',
     apply: 'build',
+    transformIndexHtml() {
+      // Register independently of the app bundle so a failed module can still receive repairs.
+      return [{ tag: 'script', attrs: { src: './register-sw.js', defer: true }, injectTo: 'head' }];
+    },
     configResolved(config) {
       publicDirectory = config.publicDir;
     },

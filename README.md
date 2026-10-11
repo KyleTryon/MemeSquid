@@ -23,8 +23,10 @@ The free, local-first meme editor behind [memesquid.com](https://memesquid.com).
 - **Installable PWA:** Add MemeSquid to an Android or iOS home screen and use the core editor offline.
 
 After a successful online installation, the editor, SVG renderer, and template library are cached
-for offline use. App updates activate after existing editor tabs close, so an open project keeps
-using a complete, consistent build. The background-removal model and its large WASM runtime are
+for offline use. App updates activate as soon as a complete build is cached and apply on the next
+navigation or reload. Open editors retain their cached assets until their tabs close or reload;
+updates do not reload an unsaved project. Invalid asset responses and cache storage failures
+cannot poison the offline build. The background-removal model and its large WASM runtime are
 downloaded separately when background removal is first used.
 
 ## Local Background Removal
