@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { buildServiceWorker } from './buildServiceWorker';
@@ -214,6 +215,46 @@ void test('offline installation includes lazy chunks and templates but defers th
   }
   const navigation = await worker.fetch('a/deep/link?query=1', 'navigate');
   assert.equal(await navigation?.text(), assets[0].source);
+});
+
+void test('cached HTML redirects can serve repeated offline page navigations', async () => {
+  const server = createServer((request, response) => {
+    if (request.url === '/index.html') {
+      response.writeHead(307, { Location: '/' });
+      response.end();
+      return;
+    }
+    response.writeHead(200, { 'Content-Type': 'text/html', 'X-Shell-Version': 'v1' });
+    response.end(assets[0].source);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const redirected = await fetch(`http://127.0.0.1:${address.port}/index.html`);
+    assert.equal(redirected.redirected, true);
+    const worker = createWorker();
+    await worker.dispatch('install');
+    const cache = [...worker.stores.values()][0];
+    cache.set(new URL('index.html', scope).href, redirected);
+    worker.goOffline();
+
+    for (const path of ['./', 'a/deep/link', './']) {
+      const navigation = await worker.fetch(path, 'navigate');
+      assert.ok(navigation);
+      // Navigations use redirect mode "manual" and reject redirected responses.
+      assert.equal(navigation.redirected, false);
+      assert.equal(navigation.status, 200);
+      assert.equal(navigation.headers.get('content-type'), 'text/html');
+      assert.equal(navigation.headers.get('x-shell-version'), 'v1');
+      assert.equal(await navigation.text(), assets[0].source);
+    }
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
 });
 
 void test('updates activate immediately and retain old caches for existing editors', async () => {

@@ -89,6 +89,14 @@ self.addEventListener('fetch', (event) => {
       const cachedResponse = await cache?.match(cacheKey, { ignoreVary: true }).catch(() => null);
       if (isValidAsset(cacheKey, cachedResponse)) {
         if (navigation && event.resultingClientId) currentBuildClients.add(event.resultingClientId);
+        // Hosts may redirect index.html to /. Navigations reject redirected responses.
+        if (navigation && cachedResponse.redirected) {
+          return new Response(cachedResponse.body, {
+            status: cachedResponse.status,
+            statusText: cachedResponse.statusText,
+            headers: cachedResponse.headers,
+          });
+        }
         return cachedResponse;
       }
 
