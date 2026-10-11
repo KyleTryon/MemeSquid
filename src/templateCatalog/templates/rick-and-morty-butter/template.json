@@ -1,0 +1,15 @@
+{
+  "id": "rick-and-morty-butter",
+  "title": "Rick and Morty Butter",
+  "aliases": ["Butter Robot", "What Is My Purpose", "You Pass Butter"],
+  "tags": ["butter", "existential-crisis", "purpose", "robot", "three-panel"],
+  "groupIds": ["rick-and-morty"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "108271304",
+      "url": "https://imgflip.com/memetemplate/108271304/Rick-and-Morty-Butter"
+    }
+  ],
+  "image": { "width": 1086, "height": 1448 }
+}

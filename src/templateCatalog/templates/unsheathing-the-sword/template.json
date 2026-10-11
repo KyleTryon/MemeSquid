@@ -1,0 +1,15 @@
+{
+  "id": "unsheathing-the-sword",
+  "title": "Unsheathing the Sword",
+  "aliases": ["Kamina's Sword"],
+  "tags": ["comparison", "reveal", "sword"],
+  "groupIds": ["gurren-lagann"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "188671450",
+      "url": "https://imgflip.com/memetemplate/188671450/Unsheathing-Sword"
+    }
+  ],
+  "image": { "width": 2224, "height": 1691 }
+}

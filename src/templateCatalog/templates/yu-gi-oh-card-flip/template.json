@@ -1,0 +1,15 @@
+{
+  "id": "yu-gi-oh-card-flip",
+  "title": "Yu-Gi-Oh Card Flip",
+  "aliases": ["Kaiba's Defeat", "Yu-Gi-Oh Exodia"],
+  "tags": ["card", "defeat", "reversal", "victory"],
+  "groupIds": ["yu-gi-oh"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "248436157",
+      "url": "https://imgflip.com/memetemplate/248436157/Yu-Gi-Oh-Exodia"
+    }
+  ],
+  "image": { "width": 1984, "height": 1984 }
+}

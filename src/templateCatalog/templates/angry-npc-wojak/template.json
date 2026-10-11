@@ -1,0 +1,15 @@
+{
+  "id": "angry-npc-wojak",
+  "title": "Angry NPC Wojak",
+  "aliases": ["Angry NPC Wojak Empty Template"],
+  "tags": ["anger", "npc", "reaction", "wojak"],
+  "groupIds": ["wojak"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "179531615",
+      "url": "https://imgflip.com/memetemplate/179531615/Angry-npc-wojak"
+    }
+  ],
+  "image": { "width": 1500, "height": 1400 }
+}

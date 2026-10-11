@@ -1,0 +1,15 @@
+{
+  "id": "bird-talk",
+  "title": "Bird Talk",
+  "aliases": ["Oiseau Birds Speak Loud"],
+  "tags": ["birds", "conversation", "shouting"],
+  "groupIds": ["false-knees"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "272706532",
+      "url": "https://imgflip.com/memetemplate/272706532/bird-talk"
+    }
+  ],
+  "image": { "width": 2389, "height": 2400 }
+}
