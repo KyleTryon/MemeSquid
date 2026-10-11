@@ -1,0 +1,15 @@
+{
+  "id": "rick-and-morty-scam",
+  "title": "Rick and Morty Scam",
+  "aliases": [],
+  "tags": ["reaction", "scam"],
+  "groupIds": ["rick-and-morty"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "66953192",
+      "url": "https://imgflip.com/memetemplate/66953192/Rick-and-Morty-Scam"
+    }
+  ],
+  "image": { "width": 1920, "height": 1080 }
+}

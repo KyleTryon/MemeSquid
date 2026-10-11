@@ -1,0 +1,15 @@
+{
+  "id": "family-guy-what-the-hell-is-this",
+  "title": "Family Guy What the Hell Is This",
+  "aliases": ["What the Hell Is This"],
+  "tags": ["confusion", "elephant", "noah", "penguin", "reaction"],
+  "groupIds": ["family-guy"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "166465934",
+      "url": "https://imgflip.com/memetemplate/166465934/Family-guy-what-the-hell-is-this"
+    }
+  ],
+  "image": { "width": 1461, "height": 1077 }
+}
