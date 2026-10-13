@@ -2201,7 +2201,7 @@ const App = () => {
     const cursor = brushCursorRef.current;
     if (!cursor || !(event.evt instanceof MouseEvent)) return;
 
-    const point = getCanvasPointerPosition(event);
+    const point = activeDrawStrokeRef.current?.filteredPoint ?? getCanvasPointerPosition(event);
     if (!point) return;
 
     cursor.style.opacity = '1';
@@ -2260,19 +2260,23 @@ const App = () => {
       );
       activeDrawStrokeRef.current = stroke;
       setLines((prev) => [...prev, stroke.line]);
+      updateBrushCursor(event);
     }
   };
 
   const handleMouseMove = (event: CanvasPointerEvent) => {
-    updateBrushCursor(event);
     const stroke = activeDrawStrokeRef.current;
-    if (tool !== 'draw' || !stroke) return;
+    if (tool !== 'draw' || !stroke) {
+      updateBrushCursor(event);
+      return;
+    }
 
     const point = getCanvasPointerPosition(event);
     if (!point) return;
 
     const next = appendDrawPoint(stroke, point);
     activeDrawStrokeRef.current = next;
+    updateBrushCursor(event);
     if (next.line !== stroke.line) {
       setLines((current) => updateItemById(current, stroke.line.id, () => next.line));
     }
@@ -2298,6 +2302,7 @@ const App = () => {
 
   const handleMouseUp = (event: CanvasPointerEvent) => {
     finishDrawing(getCanvasPointerPosition(event));
+    updateBrushCursor(event);
   };
 
   const handleMouseLeave = () => {
@@ -3462,8 +3467,8 @@ const App = () => {
                         id="brush-smoothing-help"
                         className="text-xs leading-relaxed text-content-subtle"
                       >
-                        Higher values soften wobbles for flowing curves. Set to 0 for direct
-                        drawing. Applies to new strokes.
+                        Higher values steady the brush and make it trail your pointer more. Set to 0
+                        for direct drawing. Applies to new strokes.
                       </p>
                     </div>
                   </div>
