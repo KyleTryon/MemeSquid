@@ -21,16 +21,59 @@ const drawPath = (points: ViewportPoint[], smoothing: number, zoom = 1) =>
   );
 
 void test('smoothing damps jitter with stronger damping at higher values', () => {
-  const points = Array.from({ length: 20 }, (_, index) => ({
-    x: 12 + index * 2,
-    y: index % 2 === 0 ? 22 : 18,
+  const points = Array.from({ length: 400 }, (_, index) => ({
+    x: 14 + index * 4,
+    y: 20 + Math.sin(((index + 1) * Math.PI) / 10) * 16,
   }));
-  const direct = drawPath(points, 0);
-  const moderate = drawPath(points, 50);
-  const strong = drawPath(points, 100);
-  assert.ok(Math.abs(strong.filteredPoint.y - 20) < Math.abs(moderate.filteredPoint.y - 20));
-  assert.ok(Math.abs(moderate.filteredPoint.y - 20) < Math.abs(direct.filteredPoint.y - 20));
-  assert.ok(strong.filteredPoint.x < moderate.filteredPoint.x);
+  const measureWobble = (smoothing: number) => {
+    let drawn = createDrawStroke({ ...stroke, smoothing }, { x: 10, y: 20 }, 1);
+    let energy = 0;
+    points.forEach((point, index) => {
+      drawn = appendDrawPoint(drawn, point);
+      // Exclude the startup transient and measure the whole motion, not one endpoint.
+      if (index >= 200) energy += (drawn.filteredPoint.y - 20) ** 2;
+    });
+    return Math.sqrt(energy / 200);
+  };
+  const direct = measureWobble(0);
+  const moderate = measureWobble(50);
+  const strong = measureWobble(100);
+  // An 80px-period, 32px-tall wobble must be visibly reduced at the maximum.
+  assert.ok(strong < direct * 0.3, `maximum smoothing left ${strong / direct} of the wobble`);
+  assert.ok(strong < moderate * 0.5);
+  assert.ok(moderate < direct * 0.8);
+});
+
+void test('the full slider range produces clearly distinct stabilization strengths', () => {
+  const end = { x: 410, y: 20 };
+  const lag = (smoothing: number) => end.x - drawPath([end], smoothing).filteredPoint.x;
+  assert.ok(lag(25) < 6);
+  assert.ok(lag(50) > 18 && lag(50) < 22);
+  assert.ok(lag(75) > 42 && lag(75) < 48);
+  assert.ok(lag(100) > 75 && lag(100) < 81);
+});
+
+void test('strong smoothing rounds a deliberate turn instead of just skipping points', () => {
+  const drawn = drawPath(
+    [
+      { x: 210, y: 20 },
+      { x: 210, y: 100 },
+    ],
+    100,
+  );
+  assert.ok(drawn.filteredPoint.x < 190);
+  assert.ok(drawn.filteredPoint.y < 60);
+  assert.ok(
+    drawn.line.points.some((value, index) => index % 2 === 0 && value > 150 && value < 190),
+  );
+  const finished = finishDrawStroke(drawn, drawn.pointer);
+  assert.deepEqual(finished.points.slice(-2), [210, 100]);
+  const tail = finished.points.slice(drawn.line.points.length - 2);
+  for (let index = 2; index < tail.length; index += 2) {
+    const dx = tail[index] - tail[index - 2];
+    const dy = tail[index + 1] - tail[index - 1];
+    assert.ok(Math.hypot(dx, dy) <= 2.01, 'settling must not add a long unsmoothed segment');
+  }
 });
 
 void test('direct drawing retains tiny movements and exactly follows the pointer', () => {
