@@ -9,6 +9,7 @@ The free, local-first meme editor behind [memesquid.com](https://memesquid.com).
 - **Flexible Image Import:** Drag and drop, paste from the clipboard, or choose PNG, JPEG, WebP, and SVG files.
 - **Built-in Template Library:** Search and filter the curated local catalog by title, tag, franchise, or artist.
 - **Layered Editing:** Combine multiple images, reorder layers, draw freehand, and undo or redo edits.
+- **Brush Smoothing:** Draw flowing curves with smoothing enabled at 50% by default. Adjust Smoothing in Draw settings from 0% (direct drawing) to 100%; each new stroke retains its own setting.
 - **Local Background Removal:** Remove or restore the background on the main image or any additional image. Inference runs locally in a browser worker; images are not uploaded to a removal service.
 - **Quick Image Controls:** Flip imported images horizontally or vertically from the canvas controls.
 - **Non-destructive Cropping:** Crop individual images without losing hidden pixels, or crop the full canvas while preserving off-canvas layers for later expansion.

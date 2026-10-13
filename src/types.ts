@@ -63,4 +63,5 @@ export interface LineElement {
   points: number[];
   color: string;
   strokeWidth: number;
+  smoothing: number;
 }

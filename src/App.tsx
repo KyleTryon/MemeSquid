@@ -7,6 +7,7 @@ import {
   Transformer,
   Line as KonvaLine,
   Rect,
+  Circle,
 } from 'react-konva';
 import { Html } from 'react-konva-utils';
 import Konva from 'konva';
@@ -85,7 +86,7 @@ import {
   type ViewportPoint,
 } from './canvasViewport';
 import { patchItemById, removeItemById, updateItemById } from './collectionUtils';
-import { appendDrawPoint } from './drawing';
+import { appendDrawPoint, createDrawStroke, finishDrawStroke, type DrawStroke } from './drawing';
 import {
   TEXT_ELEMENT_CLIPBOARD_TYPE,
   copyTextElement,
@@ -681,7 +682,7 @@ const App = () => {
   const [tool, setTool] = useState<EditorTool>('select');
   const [drawColor, setDrawColor] = useState('#ff0000');
   const [drawWidth, setDrawWidth] = useState(5);
-  const isDrawing = useRef(false);
+  const [drawSmoothing, setDrawSmoothing] = useState(50);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isStartOverOpen, setIsStartOverOpen] = useState(false);
   const [isTemplateLibraryOpen, setIsTemplateLibraryOpen] = useState(false);
@@ -703,7 +704,7 @@ const App = () => {
   const expansionSideRef = useRef<CanvasSide | null>(null);
   const pendingImagePlacementRef = useRef<ImagePlacement | null>(null);
   const brushCursorRef = useRef<HTMLDivElement | null>(null);
-  const activeDrawLineIdRef = useRef<string | null>(null);
+  const activeDrawStrokeRef = useRef<DrawStroke | null>(null);
   const canvasPinchGestureRef = useRef<PinchGesture | null>(null);
   const suppressSingleTouchRef = useRef(false);
   const gestureFrameRef = useRef<number | null>(null);
@@ -1479,8 +1480,7 @@ const App = () => {
   }, []);
 
   const restoreEditorSnapshot = useCallback((snapshot: EditorSnapshot) => {
-    isDrawing.current = false;
-    activeDrawLineIdRef.current = null;
+    activeDrawStrokeRef.current = null;
     isHistoryAction.current = true;
     lastSaved.current = snapshot;
     setHasPendingHistoryChange(false);
@@ -1507,7 +1507,7 @@ const App = () => {
     if (!hasChanges) return;
     setFuture((current) => (current.length > 0 ? [] : current));
     // A stroke is one edit even if the pointer pauses before it ends.
-    if (isDrawing.current) return;
+    if (activeDrawStrokeRef.current) return;
 
     const timeout = setTimeout(() => {
       if (!areEditorSnapshotsEqual(lastSaved.current, currentSnapshot)) {
@@ -2246,39 +2246,47 @@ const App = () => {
         saveHistorySnapshot(lastSaved.current);
         lastSaved.current = snapshot;
       }
-      isDrawing.current = true;
       const lineId = `line-${crypto.randomUUID()}`;
-      activeDrawLineIdRef.current = lineId;
-      setLines((prev) => [
-        ...prev,
+      const stroke = createDrawStroke(
         {
           id: lineId,
           type: 'line',
-          points: [pos.x, pos.y],
           color: drawColor,
           strokeWidth: drawWidth,
+          smoothing: drawSmoothing,
         },
-      ]);
+        pos,
+        canvasZoom,
+      );
+      activeDrawStrokeRef.current = stroke;
+      setLines((prev) => [...prev, stroke.line]);
     }
   };
 
   const handleMouseMove = (event: CanvasPointerEvent) => {
     updateBrushCursor(event);
-    const lineId = activeDrawLineIdRef.current;
-    if (tool !== 'draw' || !isDrawing.current || !lineId) return;
+    const stroke = activeDrawStrokeRef.current;
+    if (tool !== 'draw' || !stroke) return;
 
     const point = getCanvasPointerPosition(event);
     if (!point) return;
 
-    setLines((current) => updateItemById(current, lineId, (line) => appendDrawPoint(line, point)));
+    const next = appendDrawPoint(stroke, point);
+    activeDrawStrokeRef.current = next;
+    if (next.line !== stroke.line) {
+      setLines((current) => updateItemById(current, stroke.line.id, () => next.line));
+    }
   };
 
-  const handleMouseUp = () => {
-    if (tool === 'draw' && isDrawing.current) {
-      isDrawing.current = false;
-      activeDrawLineIdRef.current = null;
-      // Force history save immediately on mouse up for drawing
-      const snapshot = { canvas, texts, lines, images } satisfies EditorSnapshot;
+  const finishDrawing = (point: ViewportPoint | null) => {
+    const stroke = activeDrawStrokeRef.current;
+    if (stroke) {
+      activeDrawStrokeRef.current = null;
+      const line = finishDrawStroke(stroke, point ?? stroke.pointer);
+      const finishedLines = updateItemById(lines, line.id, () => line);
+      setLines((current) => updateItemById(current, line.id, () => line));
+      // Include the finished endpoint in the same undo entry as the stroke.
+      const snapshot = { canvas, texts, lines: finishedLines, images } satisfies EditorSnapshot;
       if (!areEditorSnapshotsEqual(lastSaved.current, snapshot)) {
         saveHistorySnapshot(lastSaved.current);
         setFuture([]);
@@ -2288,18 +2296,21 @@ const App = () => {
     }
   };
 
+  const handleMouseUp = (event: CanvasPointerEvent) => {
+    finishDrawing(getCanvasPointerPosition(event));
+  };
+
   const handleMouseLeave = () => {
     hideBrushCursor();
-    handleMouseUp();
+    finishDrawing(null);
   };
 
   const cancelActiveCanvasInteraction = () => {
-    const activeLineId = activeDrawLineIdRef.current;
-    if (activeLineId) {
-      setLines((currentLines) => removeItemById(currentLines, activeLineId));
-      activeDrawLineIdRef.current = null;
+    const stroke = activeDrawStrokeRef.current;
+    if (stroke) {
+      setLines((currentLines) => removeItemById(currentLines, stroke.line.id));
+      activeDrawStrokeRef.current = null;
     }
-    isDrawing.current = false;
 
     stageRef.current
       ?.find((node: Konva.Node) => node.isDragging())
@@ -2510,7 +2521,17 @@ const App = () => {
       if (event.evt.touches.length === 0) suppressSingleTouchRef.current = false;
       return;
     }
-    handleMouseUp();
+    const touch = event.evt.changedTouches[0];
+    const viewport = canvasViewportRef.current;
+    finishDrawing(
+      touch && viewport
+        ? getLogicalPointAtClientPosition(
+            viewport.getBoundingClientRect(),
+            getTouchPoint(touch),
+            canvasZoom,
+          )
+        : null,
+    );
   };
 
   const handleCanvasDoubleTap = (event: Konva.KonvaEventObject<TouchEvent>) => {
@@ -3183,19 +3204,30 @@ const App = () => {
                         />
                       ),
                     )}
-                    {lines.map((line) => (
-                      <KonvaLine
-                        key={line.id}
-                        points={line.points}
-                        stroke={line.color}
-                        strokeWidth={line.strokeWidth}
-                        tension={0.6}
-                        lineCap="round"
-                        lineJoin="round"
-                        globalCompositeOperation="source-over"
-                        listening={false}
-                      />
-                    ))}
+                    {lines.map((line) =>
+                      line.points.length === 2 ? (
+                        <Circle
+                          key={line.id}
+                          x={line.points[0]}
+                          y={line.points[1]}
+                          radius={line.strokeWidth / 2}
+                          fill={line.color}
+                          listening={false}
+                        />
+                      ) : (
+                        <KonvaLine
+                          key={line.id}
+                          points={line.points}
+                          stroke={line.color}
+                          strokeWidth={line.strokeWidth}
+                          tension={(line.smoothing / 100) * 0.4}
+                          lineCap="round"
+                          lineJoin="round"
+                          globalCompositeOperation="source-over"
+                          listening={false}
+                        />
+                      ),
+                    )}
                     {cropSession?.kind === 'canvas' && (
                       <CanvasCropOverlay
                         canvas={canvas}
@@ -3400,6 +3432,39 @@ const App = () => {
                           />
                         </div>
                       </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label htmlFor="brush-smoothing" className="field-label">
+                          Smoothing
+                        </label>
+                        <output
+                          htmlFor="brush-smoothing"
+                          className="text-xs tabular-nums text-content-muted"
+                        >
+                          {drawSmoothing === 0 ? 'Off' : `${drawSmoothing}%`}
+                        </output>
+                      </div>
+                      <input
+                        id="brush-smoothing"
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={drawSmoothing}
+                        onChange={(event) => setDrawSmoothing(Number(event.target.value))}
+                        aria-describedby="brush-smoothing-help"
+                        aria-valuetext={drawSmoothing === 0 ? 'Off' : `${drawSmoothing}%`}
+                        className="block h-11 w-full accent-accent"
+                      />
+                      <p
+                        id="brush-smoothing-help"
+                        className="text-xs leading-relaxed text-content-subtle"
+                      >
+                        Higher values soften wobbles for flowing curves. Set to 0 for direct
+                        drawing. Applies to new strokes.
+                      </p>
                     </div>
                   </div>
                 </div>
