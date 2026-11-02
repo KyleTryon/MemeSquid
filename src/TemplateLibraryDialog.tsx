@@ -1,4 +1,4 @@
-import { ExternalLink, Images, Loader2, Search, X } from 'lucide-react';
+import { ExternalLink, Loader2, Search, X } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 import { templateCatalog, type CatalogTemplate } from './templateCatalog/catalog';
 import { getTemplateGroups, searchTemplateCatalog } from './templateCatalog/search';
@@ -58,14 +58,11 @@ export default function TemplateLibraryDialog({
         aria-labelledby="template-library-title"
         aria-describedby="template-library-description"
         tabIndex={-1}
-        className="flex h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl border border-border bg-background shadow-2xl md:h-[min(88dvh,56rem)] md:max-w-6xl md:rounded-2xl"
+        className="flex h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl border border-border bg-background shadow-lg md:h-[min(88dvh,56rem)] md:max-w-6xl md:rounded-xl"
       >
-        <header className="flex shrink-0 items-start gap-4 border-b border-border px-4 py-4 md:px-6 md:py-5">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent text-on-accent">
-            <Images size={22} />
-          </div>
+        <header className="flex shrink-0 items-start gap-4 border-b border-border px-4 py-4 md:px-6">
           <div className="min-w-0 flex-1">
-            <h2 id="template-library-title" className="text-xl font-black text-content-strong">
+            <h2 id="template-library-title" className="text-lg font-semibold text-content-strong">
               Meme templates
             </h2>
             <p id="template-library-description" className="mt-1 text-sm text-content-muted">
@@ -96,7 +93,7 @@ export default function TemplateLibraryDialog({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search titles, tags, or groups"
-              className="h-11 w-full rounded-xl border border-border bg-canvas pl-10 pr-4 text-sm text-content-strong placeholder:text-content-subtle"
+              className="h-11 w-full rounded-lg border border-border bg-canvas pl-10 pr-4 text-sm text-content-strong placeholder:text-content-subtle"
             />
           </label>
           <label>
@@ -104,7 +101,7 @@ export default function TemplateLibraryDialog({
             <select
               value={groupId ?? ''}
               onChange={(event) => setGroupId(event.target.value || null)}
-              className="h-11 w-full rounded-xl border border-border bg-canvas px-3 text-sm font-bold text-content-strong"
+              className="h-11 w-full rounded-lg border border-border bg-canvas px-3 text-sm font-medium text-content-strong"
             >
               <option value="">All groups</option>
               {AVAILABLE_GROUP_KINDS.map((kind) => (
@@ -138,7 +135,7 @@ export default function TemplateLibraryDialog({
               <button
                 type="button"
                 onClick={clearFilters}
-                className="min-h-11 rounded-xl px-3 text-xs font-bold text-accent-hover transition-colors hover:bg-surface"
+                className="min-h-11 rounded-lg px-3 text-xs font-medium text-accent-hover transition-colors hover:bg-surface"
               >
                 Clear filters
               </button>
@@ -157,16 +154,16 @@ export default function TemplateLibraryDialog({
               ))}
             </div>
           ) : (
-            <div className="flex min-h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-border px-6 text-center">
+            <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-border px-6 text-center">
               <Search size={30} className="text-content-subtle" />
-              <p className="mt-4 font-extrabold text-content-strong">No templates found</p>
+              <p className="mt-4 font-semibold text-content-strong">No templates found</p>
               <p className="mt-1 max-w-sm text-sm text-content-muted">
                 Try a title, character, franchise, artist, or broader search.
               </p>
               <button
                 type="button"
                 onClick={clearFilters}
-                className="mt-4 min-h-11 rounded-xl border border-border bg-surface px-4 text-sm font-bold text-content-strong hover:border-accent hover:text-accent-hover"
+                className="mt-4 min-h-11 rounded-lg border border-border bg-surface px-4 text-sm font-medium text-content-strong hover:border-accent hover:text-accent-hover"
               >
                 Clear filters
               </button>
@@ -190,7 +187,7 @@ function TemplateCard({ isDisabled, isLoading, onSelect, template }: TemplateCar
   const source = getPreferredSource(template.references);
 
   return (
-    <article className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-border-emphasis focus-within:border-accent-hover">
+    <article className="flex flex-col overflow-hidden rounded-lg border border-border bg-surface transition-colors hover:border-border-emphasis focus-within:border-accent-hover">
       <button
         type="button"
         onClick={() => onSelect(template)}
@@ -217,7 +214,7 @@ function TemplateCard({ isDisabled, isLoading, onSelect, template }: TemplateCar
           )}
         </span>
         <span className="block px-3 pb-2 pt-3">
-          <span className="line-clamp-2 block text-sm font-extrabold leading-snug text-content-strong">
+          <span className="line-clamp-2 block text-sm font-semibold leading-snug text-content-strong">
             {template.title}
           </span>
           {groups.length > 0 && (
@@ -225,7 +222,7 @@ function TemplateCard({ isDisabled, isLoading, onSelect, template }: TemplateCar
               {groups.slice(0, 2).map((group) => (
                 <span
                   key={group.id}
-                  className="rounded-full bg-canvas px-2 py-1 text-[10px] font-bold text-content-muted"
+                  className="rounded bg-surface px-1.5 py-0.5 text-xs text-content-muted"
                 >
                   {group.name}
                 </span>

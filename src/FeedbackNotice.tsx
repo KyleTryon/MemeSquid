@@ -24,7 +24,7 @@ export const FeedbackNotice = ({ notice, onDismiss }: FeedbackNoticeProps) => {
     <div
       className={
         notice
-          ? `pointer-events-auto my-3 flex shrink-0 items-start gap-3 rounded-xl border bg-surface p-3 text-sm text-content-strong ${isError ? 'border-danger/40' : 'border-accent/40'}`
+          ? `pointer-events-auto my-3 flex shrink-0 items-start gap-3 rounded-lg border bg-surface p-3 text-sm text-content-strong ${isError ? 'border-danger/40' : 'border-accent/40'}`
           : 'sr-only'
       }
       onMouseEnter={() => setIsHovered(true)}
