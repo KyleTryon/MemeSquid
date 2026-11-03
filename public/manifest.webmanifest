@@ -8,8 +8,8 @@
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#030812",
-  "theme_color": "#07111f",
+  "background_color": "#0c0c0e",
+  "theme_color": "#161618",
   "orientation": "any",
   "categories": ["photo", "graphics", "entertainment"],
   "icons": [

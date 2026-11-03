@@ -1,4 +1,4 @@
-import { Crop, ArrowLeft } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { CROP_ASPECT_OPTIONS, fitCropToAspectRatio, getCropAspectRatio } from './cropGeometry';
 import type { CropAspect, Size } from './cropGeometry';
 import type { CropRect } from './types';
@@ -21,10 +21,7 @@ export const CropProperties = ({
   onClose,
 }: CropPropertiesProps) => (
   <section className="space-y-4">
-    <div className="flex items-center gap-2 text-content-muted">
-      <Crop size={14} />
-      <h3 className="text-xs font-semibold uppercase tracking-wider">Aspect ratio</h3>
-    </div>
+    <h3 className="section-title">Aspect ratio</h3>
     <div className="grid grid-cols-6 gap-2" role="group" aria-label="Crop aspect ratio">
       {CROP_ASPECT_OPTIONS.map((option, index) => {
         const disabled =
@@ -42,14 +39,14 @@ export const CropProperties = ({
             aria-pressed={aspect === option.value}
             disabled={disabled}
             title={disabled ? 'The canvas is too small for this ratio' : undefined}
-            className={`${index < 2 ? 'col-span-3' : 'col-span-2'} min-h-11 rounded-xl border px-2 py-2 text-xs font-bold transition-colors disabled:opacity-40 ${aspect === option.value ? 'border-accent-hover bg-accent/10 text-accent-hover' : 'border-border bg-canvas/50 text-content-secondary hover:border-border-emphasis'}`}
+            className={`${index < 2 ? 'col-span-3' : 'col-span-2'} rounded-lg border px-2 py-2 text-xs font-medium transition-colors disabled:opacity-40 ${aspect === option.value ? 'border-accent-hover bg-accent/10 text-accent-hover' : 'border-border bg-canvas/50 text-content-secondary hover:border-border-emphasis'}`}
           >
             {option.label}
           </button>
         );
       })}
     </div>
-    <div className="flex items-center justify-between gap-3 rounded-xl bg-surface px-3 py-3">
+    <div className="flex items-center justify-between gap-3 rounded-lg bg-surface px-3 py-3">
       <span className="field-label">Crop size</span>
       <output
         className="text-sm font-semibold tabular-nums text-content"
@@ -61,7 +58,7 @@ export const CropProperties = ({
     <button
       type="button"
       onClick={onClose}
-      className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-accent px-3 text-sm font-bold text-on-accent transition-colors hover:bg-accent-hover md:hidden"
+      className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 text-sm font-medium text-on-accent transition-colors hover:bg-accent-hover md:hidden"
     >
       <ArrowLeft size={18} /> Back to crop
     </button>

@@ -1,27 +1,27 @@
 @import 'tailwindcss';
 
 @theme static {
-  --font-sans: 'Avenir Next', 'Nunito Sans', Inter, system-ui, -apple-system, sans-serif;
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
   /* Semantic application tokens. Components consume these names directly so
      the visual system can change without coupling UI intent to a color scale. */
-  --color-canvas: #030812;
-  --color-canvas-dim: rgb(3 8 18 / 68%);
-  --color-background: #07111f;
-  --color-surface: #10243a;
-  --color-surface-hover: #1a3a54;
-  --color-border: #1a3a54;
-  --color-border-strong: #315c73;
-  --color-border-emphasis: #64869a;
-  --color-content-subtle: #809eaf;
-  --color-content-muted: #91aebc;
-  --color-content-secondary: #bfd2da;
-  --color-content: #dce9ed;
-  --color-content-strong: #f1f7f8;
-  --color-accent-strong: #08aaa8;
-  --color-accent: #21d4c2;
-  --color-accent-hover: #67ebdc;
-  --color-on-accent: #030812;
+  --color-canvas: #0c0c0e;
+  --color-canvas-dim: rgb(12 12 14 / 68%);
+  --color-background: #161618;
+  --color-surface: #222225;
+  --color-surface-hover: #2c2c30;
+  --color-border: #2a2a2e;
+  --color-border-strong: #3a3a40;
+  --color-border-emphasis: #55555d;
+  --color-content-subtle: #8a8a93;
+  --color-content-muted: #a1a1aa;
+  --color-content-secondary: #c8c8ce;
+  --color-content: #e4e4e7;
+  --color-content-strong: #fafafa;
+  --color-accent-strong: #0d9488;
+  --color-accent: #14b8a6;
+  --color-accent-hover: #2dd4bf;
+  --color-on-accent: #042f2e;
   --color-danger-strong: #ef4444;
   --color-danger: #f87171;
   --color-danger-hover: #fca5a5;
@@ -74,12 +74,18 @@ body {
 }
 
 @layer components {
+  .section-title {
+    color: var(--color-content-strong);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+  }
+
   .field-label {
     color: var(--color-content-muted);
     font-size: 0.75rem;
     font-weight: 500;
     line-height: 1.5;
-    text-transform: uppercase;
   }
 
   .dialog-close-button {
@@ -89,7 +95,7 @@ body {
     flex-shrink: 0;
     align-items: center;
     justify-content: center;
-    border-radius: 0.75rem;
+    border-radius: 0.5rem;
     color: var(--color-content-muted);
     transition:
       color 150ms ease,
@@ -132,6 +138,10 @@ button:disabled {
   outline-offset: 2px;
 }
 
+:where(input, select, textarea):focus-visible {
+  outline-offset: 0;
+}
+
 .mobile-toolbar {
   min-height: calc(4.25rem + env(safe-area-inset-bottom));
   padding-right: max(0.25rem, env(safe-area-inset-right));
@@ -151,10 +161,10 @@ button:disabled {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.2rem;
-  border-radius: 0.75rem;
-  font-size: 0.625rem;
-  font-weight: 700;
+  gap: 0.25rem;
+  border-radius: 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
   line-height: 1;
   transition:
     color 150ms ease,
@@ -199,6 +209,7 @@ button:disabled {
 .mobile-sheet-action strong {
   color: var(--color-content-strong);
   font-size: 0.875rem;
+  font-weight: 500;
 }
 
 .mobile-sheet-action small {
@@ -214,29 +225,54 @@ button:disabled {
   flex: none;
   align-items: center;
   justify-content: center;
-  border-radius: 0.75rem;
-}
-
-.properties-panel input:not([type='range']):not([type='color']),
-.properties-panel select,
-.properties-panel textarea,
-.properties-panel button {
-  min-height: 2.75rem;
-  border-radius: 0.75rem;
-}
-
-.properties-panel .color-picker-value,
-.properties-panel .color-picker-button {
-  min-height: 2.75rem;
   border-radius: 0.5rem;
 }
 
-.properties-panel input:not([type='range']):not([type='color']),
-.properties-panel select,
-.properties-panel textarea {
-  transition:
-    border-color 150ms ease,
-    box-shadow 150ms ease;
+/* Panel control sizing lives in the components layer so utility classes on an
+   individual control still win. Touch keeps 44px targets; mouse gets 36px. */
+@layer components {
+  .properties-panel
+    :is(
+      input:not([type='range'], [type='color'], .color-picker-value),
+      select,
+      textarea,
+      button:not(.color-picker-button)
+    ) {
+    min-height: 2.75rem;
+    border-radius: 0.5rem;
+  }
+
+  @media (pointer: fine) {
+    .properties-panel
+      :is(
+        input:not([type='range'], [type='color'], .color-picker-value),
+        select,
+        button:not(.color-picker-button)
+      ) {
+      min-height: 2.25rem;
+    }
+  }
+
+  .properties-panel :is(input:not([type='range'], [type='color']), select, textarea) {
+    transition:
+      border-color 150ms ease,
+      box-shadow 150ms ease;
+  }
+
+  .field-input {
+    width: 100%;
+    border: 1px solid var(--color-border);
+    border-radius: 0.375rem;
+    background: color-mix(in srgb, var(--color-canvas) 50%, transparent);
+    padding-inline: 0.625rem;
+    font-size: 0.875rem;
+    outline: none;
+    transition: border-color 150ms ease;
+  }
+
+  .field-input:focus {
+    border-color: var(--color-accent);
+  }
 }
 
 .keyboard-layer-controls {
@@ -268,8 +304,8 @@ button:disabled {
   clip: auto;
   white-space: normal;
   border: 1px solid var(--color-border-strong);
-  border-radius: 0.75rem;
-  background: color-mix(in srgb, var(--color-background) 96%, transparent);
+  border-radius: 0.5rem;
+  background: var(--color-background);
   box-shadow: 0 1rem 2rem color-mix(in srgb, var(--color-overlay) 45%, transparent);
   line-height: 1.25;
 }
@@ -278,11 +314,11 @@ button:disabled {
   min-height: 2.75rem;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--color-border);
-  border-radius: 0.625rem;
+  border-radius: 0.375rem;
   background: var(--color-surface);
   color: var(--color-content);
   font-size: 0.75rem;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .keyboard-layer-controls button[aria-pressed='true'] {
