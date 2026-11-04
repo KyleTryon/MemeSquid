@@ -64,4 +64,5 @@ export interface LineElement {
   color: string;
   strokeWidth: number;
   smoothing: number;
+  zIndex?: number;
 }

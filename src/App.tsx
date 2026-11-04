@@ -82,6 +82,15 @@ import {
 import { patchItemById, removeItemById, updateItemById } from './collectionUtils';
 import { appendDrawPoint, createDrawStroke, finishDrawStroke, type DrawStroke } from './drawing';
 import {
+  applyZIndexes,
+  getLayerOrderAvailability,
+  getTopZIndex,
+  reorderLayer,
+  sortLayers,
+  type LayerOrderAction,
+} from './layerOrder';
+import { LayerContextMenu, type LayerContextMenuState } from './LayerContextMenu';
+import {
   TEXT_ELEMENT_CLIPBOARD_TYPE,
   copyTextElement,
   readCopiedTextElement,
@@ -1557,6 +1566,30 @@ const App = () => {
     if (selectedId) deleteElement(selectedId);
   }, [deleteElement, selectedId]);
 
+  const arrangeLayer = useCallback(
+    (id: string, action: LayerOrderAction) => {
+      const zIndexes = reorderLayer([...images, ...texts, ...lines], id, action);
+      if (!zIndexes) return;
+      setImages((current) => applyZIndexes(current, zIndexes));
+      setTexts((current) => applyZIndexes(current, zIndexes));
+      setLines((current) => applyZIndexes(current, zIndexes));
+    },
+    [images, texts, lines],
+  );
+
+  const [layerMenu, setLayerMenu] = useState<LayerContextMenuState | null>(null);
+  const closeLayerMenu = useCallback(() => setLayerMenu(null), []);
+
+  const openLayerMenu = useCallback(
+    (id: string, event: Konva.KonvaEventObject<PointerEvent>) => {
+      event.evt.preventDefault();
+      if (tool !== 'select' || cropSession) return;
+      setSelectedId(id);
+      setLayerMenu({ id, x: event.evt.clientX, y: event.evt.clientY });
+    },
+    [tool, cropSession],
+  );
+
   // --- Keyboard Shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1589,6 +1622,17 @@ const App = () => {
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         redo();
+      } else if (
+        (e.ctrlKey || e.metaKey) &&
+        (e.code === 'BracketRight' || e.code === 'BracketLeft')
+      ) {
+        if (!selectedId || selectedId === CANVAS_ID) return;
+        e.preventDefault();
+        const isUp = e.code === 'BracketRight';
+        arrangeLayer(
+          selectedId,
+          e.shiftKey ? (isUp ? 'front' : 'back') : isUp ? 'forward' : 'backward',
+        );
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         deleteSelected();
@@ -1601,6 +1645,8 @@ const App = () => {
     undo,
     redo,
     deleteSelected,
+    arrangeLayer,
+    selectedId,
     cropSession,
     expansionDraft,
     cancelExpansion,
@@ -1839,11 +1885,7 @@ const App = () => {
           }
           const previousPaste = lastTextPasteRef.current;
           const offset = previousPaste?.serialized === serialized ? previousPaste.offset + 20 : 20;
-          const topZIndex = Math.max(
-            0,
-            ...texts.map((text) => text.zIndex ?? 0),
-            ...images.map((image) => image.zIndex ?? 0),
-          );
+          const topZIndex = getTopZIndex([...texts, ...images, ...lines]);
           const pastedText = createPastedTextElement(copiedText, offset, topZIndex + 1);
           checkpointEditorHistory();
           setTexts((current) => [...current, pastedText]);
@@ -1891,6 +1933,7 @@ const App = () => {
     expansionDraft,
     images,
     isEditorDialogOpen,
+    lines,
     loadImageFile,
     selectedId,
     texts,
@@ -2250,6 +2293,7 @@ const App = () => {
           color: drawColor,
           strokeWidth: drawWidth,
           smoothing: drawSmoothing,
+          zIndex: Date.now(),
         },
         pos,
         canvasZoom,
@@ -2651,10 +2695,15 @@ const App = () => {
             ? 'Canvas'
             : 'Properties';
 
-  const allElements = [
+  const canvasLayers = sortLayers([
     ...images.map((i) => ({ ...i, _itemType: 'image' as const })),
     ...texts.map((t) => ({ ...t, _itemType: 'text' as const })),
-  ].sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0));
+    ...lines.map((l) => ({ ...l, _itemType: 'line' as const })),
+  ]);
+  const allElements = canvasLayers.filter(
+    (element): element is Exclude<(typeof canvasLayers)[number], { _itemType: 'line' }> =>
+      element._itemType !== 'line',
+  );
   const canvasDescription = canvas
     ? `Meme canvas, ${canvas.width} by ${canvas.height} pixels. ${images.length} ${images.length === 1 ? 'image' : 'images'}, ${texts.length} text ${texts.length === 1 ? 'element' : 'elements'}, and ${lines.length} drawn ${lines.length === 1 ? 'line' : 'lines'}.${texts.length > 0 ? ` Text content: ${texts.map((text) => text.text || 'empty text').join('; ')}.` : ''}`
     : 'No meme canvas has been created yet.';
@@ -3144,8 +3193,32 @@ const App = () => {
                       height={canvas.height}
                       fill={canvas.fill.type === 'solid' ? canvas.fill.color : 'rgba(0,0,0,0)'}
                     />
-                    {allElements.map((element) =>
-                      element._itemType === 'image' ? (
+                    {canvasLayers.map((element) => {
+                      if (element._itemType === 'line') {
+                        return element.points.length === 2 ? (
+                          <Circle
+                            key={element.id}
+                            x={element.points[0]}
+                            y={element.points[1]}
+                            radius={element.strokeWidth / 2}
+                            fill={element.color}
+                            listening={false}
+                          />
+                        ) : (
+                          <KonvaLine
+                            key={element.id}
+                            points={element.points}
+                            stroke={element.color}
+                            strokeWidth={element.strokeWidth}
+                            tension={(element.smoothing / 100) * 0.4}
+                            lineCap="round"
+                            lineJoin="round"
+                            globalCompositeOperation="source-over"
+                            listening={false}
+                          />
+                        );
+                      }
+                      return element._itemType === 'image' ? (
                         <ImageElementItem
                           key={element.id}
                           data={toKonvaElementData(element)}
@@ -3153,6 +3226,7 @@ const App = () => {
                           onSelect={(id: string) => {
                             if (tool === 'select' && !cropSession) setSelectedId(id);
                           }}
+                          onContextMenu={openLayerMenu}
                           onChange={updateImage}
                           tool={tool}
                           onFlip={flipImage}
@@ -3182,35 +3256,12 @@ const App = () => {
                           onSelect={(id: string) => {
                             if (tool === 'select' && !cropSession) setSelectedId(id);
                           }}
+                          onContextMenu={openLayerMenu}
                           onChange={updateText}
                           tool={tool}
                         />
-                      ),
-                    )}
-                    {lines.map((line) =>
-                      line.points.length === 2 ? (
-                        <Circle
-                          key={line.id}
-                          x={line.points[0]}
-                          y={line.points[1]}
-                          radius={line.strokeWidth / 2}
-                          fill={line.color}
-                          listening={false}
-                        />
-                      ) : (
-                        <KonvaLine
-                          key={line.id}
-                          points={line.points}
-                          stroke={line.color}
-                          strokeWidth={line.strokeWidth}
-                          tension={(line.smoothing / 100) * 0.4}
-                          lineCap="round"
-                          lineJoin="round"
-                          globalCompositeOperation="source-over"
-                          listening={false}
-                        />
-                      ),
-                    )}
+                      );
+                    })}
                     {cropSession?.kind === 'canvas' && (
                       <CanvasCropOverlay
                         canvas={canvas}
@@ -3868,6 +3919,15 @@ const App = () => {
           </div>
         </aside>
       </main>
+
+      {layerMenu && allElements.some((element) => element.id === layerMenu.id) && (
+        <LayerContextMenu
+          menu={layerMenu}
+          {...getLayerOrderAvailability(canvasLayers, layerMenu.id)}
+          onArrange={arrangeLayer}
+          onClose={closeLayerMenu}
+        />
+      )}
 
       <MobileDialogSheet
         id="mobile-layers"
@@ -5104,16 +5164,19 @@ const CanvasProperties = memo(
 
 // --- Sub-component for individual text nodes ---
 
+type LayerContextMenuHandler = (id: string, event: Konva.KonvaEventObject<PointerEvent>) => void;
+
 interface TextElementItemProps {
   data: TextElement;
   isSelected: boolean;
   onSelect: (id: string) => void;
+  onContextMenu: LayerContextMenuHandler;
   onChange: (id: string, attrs: ItemPatch<TextElement>) => void;
   tool: EditorTool;
 }
 
 const TextElementItem = memo(
-  ({ data, isSelected, onSelect, onChange, tool }: TextElementItemProps) => {
+  ({ data, isSelected, onSelect, onContextMenu, onChange, tool }: TextElementItemProps) => {
     const shapeRef = useRef<Konva.Text | null>(null);
     const trRef = useRef<Konva.Transformer | null>(null);
     const axisLockedDragHandlers = useAxisLockedDrag();
@@ -5131,6 +5194,7 @@ const TextElementItem = memo(
           listening={tool === 'select'}
           onClick={() => onSelect(data.id)}
           onTap={() => onSelect(data.id)}
+          onContextMenu={(event) => onContextMenu(data.id, event)}
           {...axisLockedDragHandlers}
           onDragEnd={(event) => {
             const node = event.target as Konva.Text;
@@ -5348,6 +5412,7 @@ interface ImageElementItemProps extends Omit<ImageContextualControlsProps, 'imag
   data: ImageElement;
   isSelected: boolean;
   onSelect: (id: string) => void;
+  onContextMenu: LayerContextMenuHandler;
   onChange: (id: string, attrs: ItemPatch<ImageElement>) => void;
   tool: EditorTool;
   cropDraft: CropRect | null;
@@ -5364,6 +5429,7 @@ const ImageElementItem = memo(
     data,
     isSelected,
     onSelect,
+    onContextMenu,
     onChange,
     tool,
     onFlip,
@@ -5574,6 +5640,7 @@ const ImageElementItem = memo(
             listening={tool === 'select'}
             onClick={() => onSelect(data.id)}
             onTap={() => onSelect(data.id)}
+            onContextMenu={(event) => onContextMenu(data.id, event)}
             {...axisLockedDragHandlers}
             onTransform={updateHtmlPos}
             onDragEnd={(event) => {
