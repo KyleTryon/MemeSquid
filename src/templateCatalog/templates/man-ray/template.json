@@ -1,0 +1,15 @@
+{
+  "id": "man-ray",
+  "title": "Man Ray",
+  "aliases": ["Aren't These X", "Aren't You X", "Is This Your Wallet?", "Patrick Star and Man Ray"],
+  "tags": ["argument", "denial", "logic", "man-ray", "patrick"],
+  "groupIds": ["spongebob-squarepants"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "248215103",
+      "url": "https://imgflip.com/memetemplate/248215103/Man-Ray"
+    }
+  ],
+  "image": { "width": 1708, "height": 2097 }
+}

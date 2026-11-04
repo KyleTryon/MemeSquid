@@ -1,0 +1,15 @@
+{
+  "id": "timmy-turner-praying",
+  "title": "Timmy Turner Praying",
+  "aliases": ["Timmy Turner praying Blank"],
+  "tags": ["praying", "timmy-turner", "wish"],
+  "groupIds": ["the-fairly-oddparents"],
+  "references": [
+    {
+      "kind": "imgflip-template",
+      "templateId": "488292419",
+      "url": "https://imgflip.com/memetemplate/488292419/Timmy-Turner-praying-Blank"
+    }
+  ],
+  "image": { "width": 1125, "height": 706 }
+}
