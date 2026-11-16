@@ -32,6 +32,7 @@ export function useDialogFocus<T extends HTMLElement = HTMLDivElement>(
     const previouslyFocused =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusDialog = window.requestAnimationFrame(() => {
+      if (dialog.contains(document.activeElement)) return;
       const visibleControls = getVisibleControls();
       const initialFocus =
         visibleControls.find((element) => element.hasAttribute('data-dialog-initial-focus')) ??

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
+import { flushSync } from 'react-dom';
 import {
   Stage,
   Layer,
@@ -703,6 +704,7 @@ const App = () => {
   const { canInstall, dismissInstallHelp, install, installMode, isAppleMobile, isInstallHelpOpen } =
     usePwaInstall();
   const addImageInputRef = useRef<HTMLInputElement | null>(null);
+  const textContentRef = useRef<HTMLTextAreaElement | null>(null);
   const canvasAreaRef = useRef<HTMLElement | null>(null);
   const canvasViewportRef = useRef<HTMLDivElement | null>(null);
   const exportMenuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -1675,6 +1677,26 @@ const App = () => {
 
   const lastText = texts[texts.length - 1];
 
+  const focusTextContent = useCallback((selectAll: boolean = false) => {
+    const field = textContentRef.current;
+    if (!field) return;
+    field.focus();
+    if (selectAll) field.select();
+  }, []);
+
+  const editText = useCallback(
+    (id: string) => {
+      if (tool !== 'select' || cropSession) return;
+      // Mount the selected caption's controls before focusing within the user gesture.
+      flushSync(() => {
+        setSelectedId(id);
+        openMobileProps();
+      });
+      focusTextContent();
+    },
+    [cropSession, focusTextContent, openMobileProps, tool],
+  );
+
   const addText = useCallback(() => {
     if (!canvas) return;
     const newText = createTextElement(
@@ -1685,13 +1707,16 @@ const App = () => {
       lastText?.fontSize ?? 40,
       lastText ? getTextStyle(lastText) : undefined,
     );
-    setTexts((prev) => [...prev, newText]);
-    setSelectedId(newText.id);
-    setTool('select');
-    setIsMobileAddOpen(false);
-    setIsMobileLayersOpen(false);
-    openMobileProps();
-  }, [canvas, lastText, openMobileProps]);
+    flushSync(() => {
+      setTexts((prev) => [...prev, newText]);
+      setSelectedId(newText.id);
+      setTool('select');
+      setIsMobileAddOpen(false);
+      setIsMobileLayersOpen(false);
+      openMobileProps();
+    });
+    focusTextContent(true);
+  }, [canvas, focusTextContent, lastText, openMobileProps]);
 
   const updateText = useCallback((id: string, attrs: ItemPatch<TextElement>) => {
     setTexts((currentTexts) => patchItemById(currentTexts, id, attrs));
@@ -3264,6 +3289,7 @@ const App = () => {
                           onSelect={(id: string) => {
                             if (tool === 'select' && !cropSession) setSelectedId(id);
                           }}
+                          onEdit={editText}
                           onContextMenu={openLayerMenu}
                           onChange={updateText}
                           tool={tool}
@@ -3490,6 +3516,7 @@ const App = () => {
                 <div className="space-y-3">
                   <h3 className="section-title">Content</h3>
                   <textarea
+                    ref={textContentRef}
                     id="text-content"
                     aria-label="Meme text content"
                     value={selectedText.text}
@@ -4964,13 +4991,14 @@ interface TextElementItemProps {
   data: TextElement;
   isSelected: boolean;
   onSelect: (id: string) => void;
+  onEdit: (id: string) => void;
   onContextMenu: LayerContextMenuHandler;
   onChange: (id: string, attrs: ItemPatch<TextElement>) => void;
   tool: EditorTool;
 }
 
 const TextElementItem = memo(
-  ({ data, isSelected, onSelect, onContextMenu, onChange, tool }: TextElementItemProps) => {
+  ({ data, isSelected, onSelect, onEdit, onContextMenu, onChange, tool }: TextElementItemProps) => {
     const shapeRef = useRef<Konva.Text | null>(null);
     const trRef = useRef<Konva.Transformer | null>(null);
     const axisLockedDragHandlers = useAxisLockedDrag();
@@ -4988,6 +5016,12 @@ const TextElementItem = memo(
           listening={tool === 'select'}
           onClick={() => onSelect(data.id)}
           onTap={() => onSelect(data.id)}
+          onDblClick={() => onEdit(data.id)}
+          onDblTap={(event) => {
+            event.cancelBubble = true;
+            event.evt.preventDefault();
+            onEdit(data.id);
+          }}
           onContextMenu={(event) => onContextMenu(data.id, event)}
           {...axisLockedDragHandlers}
           onDragEnd={(event) => {

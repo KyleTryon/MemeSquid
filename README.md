@@ -13,7 +13,7 @@ The free, local-first meme editor behind [memesquid.com](https://memesquid.com).
 - **Local Background Removal:** Remove or restore the background on the main image or any additional image. Inference runs locally in a browser worker; images are not uploaded to a removal service.
 - **Quick Image Controls:** Flip imported images horizontally or vertically from the canvas controls.
 - **Non-destructive Cropping:** Crop individual images without losing hidden pixels, or crop the full canvas while preserving off-canvas layers for later expansion.
-- **Text Editing:** Add multiple text layers, drag or resize them, and customize their appearance.
+- **Text Editing:** Add multiple text layers, drag or resize them, and customize their appearance. Double-click or double-tap a caption to focus its text field; new captions start with their placeholder text selected so you can type immediately.
 - **Properties Panel:**
   - **Typography:** Change font family, size, and alignment.
   - **Sliders and exact values:** Adjust font size, outline width, shadow blur, opacity, and rotation with live sliders or numeric fields. Each property-slider drag is one undo step; larger typed sizes expand the size sliders' ranges.
