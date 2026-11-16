@@ -16,11 +16,13 @@ The free, local-first meme editor behind [memesquid.com](https://memesquid.com).
 - **Text Editing:** Add multiple text layers, drag or resize them, and customize their appearance.
 - **Properties Panel:**
   - **Typography:** Change font family, size, and alignment.
+  - **Sliders and exact values:** Adjust font size, outline width, shadow blur, opacity, and rotation with live sliders or numeric fields. Each property-slider drag is one undo step; larger typed sizes expand the size sliders' ranges.
   - **Colors:** Customize fill and stroke (outline) colors.
-  - **Shadows:** Add and adjust drop shadows (color, blur, opacity, offset X/Y).
+  - **Shadows:** Expand Shadow to adjust color, blur, opacity (shown as a percentage), and X/Y offsets.
   - **Layout:** Fine-tune X/Y coordinates precisely.
+  - **Numeric fields:** Apply edits with Enter or by leaving the field; Escape cancels. Empty or invalid entries keep the previous value. Text and image coordinates use the canvas's top-left origin, with positive Y moving down.
 - **Proportional Scaling:** Text width and stroke width scale naturally when resizing via the canvas handles.
-- **Export:** Copy a PNG to the clipboard or download PNG, JPEG, and WebP files at high quality.
+- **Export:** Copy a PNG to the clipboard or download PNG, JPEG, and WebP files at high quality. Exporting preserves your selected layer and excludes selection handles from the image.
 - **Installable PWA:** Add MemeSquid to an Android or iOS home screen and use the core editor offline.
 
 After a successful online installation, the editor, SVG renderer, and template library are cached

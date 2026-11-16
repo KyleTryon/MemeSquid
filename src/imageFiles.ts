@@ -11,6 +11,24 @@ export const readImageFile = (file: File): Promise<string> =>
     else reader.readAsDataURL(file);
   });
 
+export const copyCanvasToClipboard = (canvas: Pick<HTMLCanvasElement, 'toBlob'>): Promise<void> => {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+    throw new Error('Image clipboard access is unavailable.');
+  }
+
+  const image = new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error('The image could not be copied.'));
+    }, 'image/png');
+  });
+
+  // Register the write during the click; encoding can finish asynchronously.
+  // Safari requires user activation when clipboard.write is called.
+  void image.catch(() => {});
+  return navigator.clipboard.write([new ClipboardItem({ 'image/png': image })]);
+};
+
 export const downloadImage = (dataUrl: string, filename: string): void => {
   if (
     !dataUrl.startsWith('data:image/') ||

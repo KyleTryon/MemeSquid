@@ -138,6 +138,8 @@ export const ColorPicker = ({
         onKeyDown={(event) => {
           if (event.key === 'Enter') event.currentTarget.blur();
           if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
             isCancellingEdit.current = true;
             setDraftValue(value.toUpperCase());
             event.currentTarget.blur();

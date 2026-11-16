@@ -1,6 +1,63 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { downloadImage, readImageFile } from './imageFiles';
+import { copyCanvasToClipboard, downloadImage, readImageFile } from './imageFiles';
+
+void test('image copying registers the clipboard write before asynchronous encoding finishes', async (context) => {
+  const previousNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const previousClipboardItem = Object.getOwnPropertyDescriptor(globalThis, 'ClipboardItem');
+  class TestClipboardItem {
+    constructor(readonly data: Record<string, Promise<Blob>>) {}
+  }
+  const writes: TestClipboardItem[][] = [];
+  const clipboard = {
+    write: (items: TestClipboardItem[]) => {
+      writes.push(items);
+      return Promise.all(items.map((item) => item.data['image/png'])).then(() => {});
+    },
+  };
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { clipboard },
+  });
+  Object.defineProperty(globalThis, 'ClipboardItem', {
+    configurable: true,
+    value: TestClipboardItem,
+  });
+  context.after(() => {
+    if (previousNavigator) Object.defineProperty(globalThis, 'navigator', previousNavigator);
+    else Reflect.deleteProperty(globalThis, 'navigator');
+    if (previousClipboardItem)
+      Object.defineProperty(globalThis, 'ClipboardItem', previousClipboardItem);
+    else Reflect.deleteProperty(globalThis, 'ClipboardItem');
+  });
+
+  const encoders: BlobCallback[] = [];
+  const canvas = {
+    toBlob: (callback: BlobCallback, type?: string) => {
+      assert.equal(type, 'image/png');
+      encoders.push(callback);
+    },
+  };
+  const copied = copyCanvasToClipboard(canvas);
+  assert.equal(writes.length, 1, 'write must run synchronously while the click is active');
+  const blob = new Blob(['png'], { type: 'image/png' });
+  encoders[0](blob);
+  await copied;
+  assert.equal(await writes[0][0].data['image/png'], blob);
+
+  const failed = copyCanvasToClipboard(canvas);
+  encoders[1](null);
+  await assert.rejects(failed, /could not be copied/);
+
+  const permissionError = new DOMException('Clipboard blocked', 'NotAllowedError');
+  clipboard.write = () => Promise.reject(permissionError);
+  const denied = copyCanvasToClipboard(canvas);
+  await assert.rejects(denied, (error: Error) => error === permissionError);
+  encoders[2](null);
+
+  Reflect.deleteProperty(globalThis, 'ClipboardItem');
+  assert.throws(() => copyCanvasToClipboard(canvas), /unavailable/);
+});
 
 void test('image file reads support raster and SVG input and reject read failures', async (context) => {
   const previousReader = Object.getOwnPropertyDescriptor(globalThis, 'FileReader');

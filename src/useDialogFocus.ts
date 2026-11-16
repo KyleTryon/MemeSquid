@@ -41,6 +41,7 @@ export function useDialogFocus<T extends HTMLElement = HTMLDivElement>(
     });
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
@@ -75,10 +76,10 @@ export function useDialogFocus<T extends HTMLElement = HTMLDivElement>(
       }
     };
 
-    document.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
       window.cancelAnimationFrame(focusDialog);
-      document.removeEventListener('keydown', handleKeyDown, true);
+      document.removeEventListener('keydown', handleKeyDown);
       if (previouslyFocused && document.contains(previouslyFocused)) previouslyFocused.focus();
     };
   }, [isOpen, trapFocus]);

@@ -20,7 +20,7 @@ import {
   ChevronDown,
   Undo2,
   Redo2,
-  PenTool,
+  Pencil,
   MousePointer2,
   HelpCircle,
   X,
@@ -46,7 +46,6 @@ import {
   Images as TemplateLibraryIcon,
   Bold,
   CaseUpper,
-  Minus,
   Layers3,
 } from 'lucide-react';
 import {
@@ -100,13 +99,15 @@ import type { ItemPatch } from './collectionUtils';
 import { useAxisLockedDrag, useSelectedTransformer } from './konvaInteractions';
 import { usePwaInstall } from './usePwaInstall';
 import { ColorPicker } from './ColorPicker';
+import { NumericInput } from './NumericInput';
+import { SliderControl } from './SliderControl';
 import type { CatalogTemplate } from './templateCatalog/catalog';
 import { useDialogFocus } from './useDialogFocus';
 import { useFeedback } from './useFeedback';
 import { FeedbackNotice } from './FeedbackNotice';
 import { CropProperties } from './CropProperties';
 import type { CropAspect } from './cropGeometry';
-import { readImageFile, downloadImage } from './imageFiles';
+import { readImageFile, downloadImage, copyCanvasToClipboard } from './imageFiles';
 
 const TemplateLibraryDialog = React.lazy(() => import('./TemplateLibraryDialog'));
 
@@ -846,6 +847,7 @@ const App = () => {
   const [past, setPast] = useState<EditorSnapshot[]>([]);
   const [future, setFuture] = useState<EditorSnapshot[]>([]);
   const [hasPendingHistoryChange, setHasPendingHistoryChange] = useState(false);
+  const [isAdjustingProperty, setIsAdjustingProperty] = useState(false);
   const isHistoryAction = useRef(false);
   const lastSaved = useRef<EditorSnapshot>({ canvas, texts, lines, images });
 
@@ -1486,6 +1488,7 @@ const App = () => {
 
   const restoreEditorSnapshot = useCallback((snapshot: EditorSnapshot) => {
     activeDrawStrokeRef.current = null;
+    setIsAdjustingProperty(false);
     isHistoryAction.current = true;
     lastSaved.current = snapshot;
     setHasPendingHistoryChange(false);
@@ -1496,6 +1499,15 @@ const App = () => {
     setCropSession(null);
     setExpansionDraft(null);
   }, []);
+
+  const savePendingHistory = useCallback(() => {
+    const snapshot = { canvas, texts, lines, images } satisfies EditorSnapshot;
+    if (!areEditorSnapshotsEqual(lastSaved.current, snapshot)) {
+      saveHistorySnapshot(lastSaved.current);
+      lastSaved.current = snapshot;
+    }
+    setHasPendingHistoryChange(false);
+  }, [canvas, texts, lines, images, saveHistorySnapshot]);
 
   useEffect(() => {
     const currentSnapshot = { canvas, texts, lines, images } satisfies EditorSnapshot;
@@ -1511,19 +1523,22 @@ const App = () => {
     setHasPendingHistoryChange(hasChanges);
     if (!hasChanges) return;
     setFuture((current) => (current.length > 0 ? [] : current));
-    // A stroke is one edit even if the pointer pauses before it ends.
-    if (activeDrawStrokeRef.current) return;
+    // Continuous gestures stay one edit, including pauses before release.
+    if (activeDrawStrokeRef.current || isAdjustingProperty) return;
 
-    const timeout = setTimeout(() => {
-      if (!areEditorSnapshotsEqual(lastSaved.current, currentSnapshot)) {
-        saveHistorySnapshot(lastSaved.current);
-        lastSaved.current = currentSnapshot;
-      }
-      setHasPendingHistoryChange(false);
-    }, 400);
-
+    const timeout = setTimeout(savePendingHistory, 400);
     return () => clearTimeout(timeout);
-  }, [canvas, texts, lines, images, saveHistorySnapshot]);
+  }, [canvas, texts, lines, images, isAdjustingProperty, savePendingHistory]);
+
+  const beginPropertyAdjustment = useCallback(() => {
+    savePendingHistory();
+    setIsAdjustingProperty(true);
+  }, [savePendingHistory]);
+
+  const endPropertyAdjustment = useCallback(() => {
+    savePendingHistory();
+    setIsAdjustingProperty(false);
+  }, [savePendingHistory]);
 
   const undo = useCallback(() => {
     const currentSnapshot = { canvas, texts, lines, images } satisfies EditorSnapshot;
@@ -1661,6 +1676,7 @@ const App = () => {
   const lastText = texts[texts.length - 1];
 
   const addText = useCallback(() => {
+    if (!canvas) return;
     const newText = createTextElement(
       'TOP TEXT',
       50,
@@ -1675,7 +1691,7 @@ const App = () => {
     setIsMobileAddOpen(false);
     setIsMobileLayersOpen(false);
     openMobileProps();
-  }, [lastText, openMobileProps]);
+  }, [canvas, lastText, openMobileProps]);
 
   const updateText = useCallback((id: string, attrs: ItemPatch<TextElement>) => {
     setTexts((currentTexts) => patchItemById(currentTexts, id, attrs));
@@ -2280,11 +2296,7 @@ const App = () => {
     if (tool === 'draw') {
       const pos = getCanvasPointerPosition(event);
       if (!pos) return;
-      const snapshot = { canvas, texts, lines, images } satisfies EditorSnapshot;
-      if (!areEditorSnapshotsEqual(lastSaved.current, snapshot)) {
-        saveHistorySnapshot(lastSaved.current);
-        lastSaved.current = snapshot;
-      }
+      savePendingHistory();
       const lineId = `line-${crypto.randomUUID()}`;
       const stroke = createDrawStroke(
         {
@@ -2595,56 +2607,52 @@ const App = () => {
 
   const exportMeme = useCallback(
     (format: 'png' | 'jpeg' | 'webp' | 'clipboard') => {
-      setSelectedId(null);
+      if (!canvas || cropSession) return;
       setIsExportMenuOpen(false);
-      // Allow selection handles to disappear before rendering the export.
-      setTimeout(() => {
-        void runWithFeedback(
-          async () => {
-            const stage = stageRef.current;
-            if (!stage) throw new Error('There is no canvas to export.');
-            const mimeType = format === 'clipboard' ? 'image/png' : `image/${format}`;
-            let uri: string;
-            if (format === 'jpeg' && canvas?.fill.type === 'transparent') {
-              const renderedCanvas = stage.toCanvas({ pixelRatio: 2 });
-              const flattenedCanvas = document.createElement('canvas');
-              flattenedCanvas.width = renderedCanvas.width;
-              flattenedCanvas.height = renderedCanvas.height;
-              const context = flattenedCanvas.getContext('2d');
-              if (!context) throw new Error('The export canvas could not be created.');
-              context.fillStyle = '#ffffff';
-              context.fillRect(0, 0, flattenedCanvas.width, flattenedCanvas.height);
-              context.drawImage(renderedCanvas, 0, 0);
-              uri = flattenedCanvas.toDataURL(mimeType);
-            } else {
-              uri = stage.toDataURL({ mimeType, pixelRatio: 2 });
-            }
+      void runWithFeedback(
+        async () => {
+          const stage = stageRef.current;
+          if (!stage) throw new Error('There is no canvas to export.');
+          const transformers = stage.find('Transformer').filter((node) => node.visible());
+          let renderedCanvas: HTMLCanvasElement;
+          try {
+            transformers.forEach((node) => node.hide());
+            renderedCanvas = stage.toCanvas({ pixelRatio: 2 });
+          } finally {
+            transformers.forEach((node) => node.show());
+          }
 
-            if (format === 'clipboard') {
-              if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
-                throw new Error('Image clipboard access is unavailable.');
-              }
-              const response = await fetch(uri);
-              const blob = await response.blob();
-              await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-            } else {
-              downloadImage(uri, `memesquid-${new Date().toISOString().slice(0, 10)}.${format}`);
-            }
-          },
-          {
-            success:
-              format === 'clipboard'
-                ? 'Meme copied to the clipboard.'
-                : `${format.toUpperCase()} download started.`,
-            error:
-              format === 'clipboard'
-                ? 'The meme could not be copied. Try downloading it as PNG instead.'
-                : 'The meme could not be exported. Try again or choose another format.',
-          },
-        );
-      }, 100);
+          if (format === 'clipboard') {
+            await copyCanvasToClipboard(renderedCanvas);
+            return;
+          }
+
+          if (format === 'jpeg' && canvas.fill.type === 'transparent') {
+            const context = renderedCanvas.getContext('2d');
+            if (!context) throw new Error('The export canvas could not be created.');
+            context.globalCompositeOperation = 'destination-over';
+            context.fillStyle = '#ffffff';
+            context.fillRect(0, 0, renderedCanvas.width, renderedCanvas.height);
+          }
+          const uri = renderedCanvas.toDataURL(`image/${format}`, 0.95);
+          if (!uri.startsWith(`data:image/${format};`)) {
+            throw new Error(`The browser could not encode ${format.toUpperCase()}.`);
+          }
+          downloadImage(uri, `memesquid-${new Date().toISOString().slice(0, 10)}.${format}`);
+        },
+        {
+          success:
+            format === 'clipboard'
+              ? 'Meme copied to the clipboard.'
+              : `${format.toUpperCase()} download started.`,
+          error:
+            format === 'clipboard'
+              ? 'The meme could not be copied. Try downloading it as PNG instead.'
+              : 'The meme could not be exported. Try again or choose another format.',
+        },
+      );
     },
-    [canvas, runWithFeedback],
+    [canvas, cropSession, runWithFeedback],
   );
 
   const exportBackgroundRemovedPng = useCallback(
@@ -2945,13 +2953,13 @@ const App = () => {
                 setIsMobileLayersOpen(false);
                 openMobileProps();
               }}
-              disabled={Boolean(cropSession)}
+              disabled={!canvas || Boolean(cropSession)}
               aria-label="Draw tool"
               aria-pressed={tool === 'draw'}
               className={`mobile-tab-item order-4 md:order-3 md:flex md:h-11 md:w-11 md:items-center md:justify-center md:rounded-md md:transition-colors md:pointer-fine:h-10 md:pointer-fine:w-10 ${tool === 'draw' ? 'text-accent-hover md:bg-accent/15' : 'text-content-muted md:hover:bg-surface md:hover:text-content-strong'}`}
               title="Draw Tool"
             >
-              <PenTool size={20} />
+              <Pencil size={20} />
               <span className="md:hidden">Draw</span>
             </button>
             <div
@@ -2965,7 +2973,7 @@ const App = () => {
                 setIsMobileLayersOpen(false);
                 setIsMobilePropsOpen(false);
               }}
-              disabled={Boolean(cropSession)}
+              disabled={!canvas || Boolean(cropSession)}
               aria-label="Add to meme"
               aria-expanded={isMobileAddOpen}
               className={`mobile-only-tab mobile-tab-item order-2 md:hidden ${isMobileAddOpen ? 'text-accent-hover' : 'text-content-muted'}`}
@@ -2976,7 +2984,7 @@ const App = () => {
             <button
               type="button"
               onClick={addText}
-              disabled={Boolean(cropSession)}
+              disabled={!canvas || Boolean(cropSession)}
               aria-label="Add text"
               className={`hidden md:order-7 md:flex ${TOOLBAR_BUTTON_CLASS} ${TOOLBAR_BUTTON_IDLE_CLASS}`}
               title="Add Text"
@@ -3421,32 +3429,22 @@ const App = () => {
                       />
                     </div>
 
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between items-center">
-                        <label htmlFor="brush-size" className="field-label">
-                          Brush size
-                        </label>
-                        <output
-                          htmlFor="brush-size"
-                          className="text-xs tabular-nums text-content-muted"
+                    <SliderControl
+                      id="brush-size"
+                      label="Brush size"
+                      unit="px"
+                      min={1}
+                      max={50}
+                      expandRange
+                      value={drawWidth}
+                      onChange={setDrawWidth}
+                      preview={
+                        <div
+                          aria-hidden="true"
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-canvas/50"
                         >
-                          {drawWidth}px
-                        </output>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <input
-                          id="brush-size"
-                          type="range"
-                          min="1"
-                          max="50"
-                          step="1"
-                          value={drawWidth}
-                          onChange={(e) => setDrawWidth(Number(e.target.value))}
-                          className="flex-1 accent-accent"
-                        />
-                        <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-canvas/50">
                           <div
-                            className="rounded-full bg-accent"
+                            className="rounded-full"
                             style={{
                               width: `${Math.min(drawWidth, 38)}px`,
                               height: `${Math.min(drawWidth, 38)}px`,
@@ -3454,32 +3452,18 @@ const App = () => {
                             }}
                           />
                         </div>
-                      </div>
-                    </div>
-
+                      }
+                    />
                     <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <label htmlFor="brush-smoothing" className="field-label">
-                          Smoothing
-                        </label>
-                        <output
-                          htmlFor="brush-smoothing"
-                          className="text-xs tabular-nums text-content-muted"
-                        >
-                          {drawSmoothing === 0 ? 'Off' : `${drawSmoothing}%`}
-                        </output>
-                      </div>
-                      <input
+                      <SliderControl
                         id="brush-smoothing"
-                        type="range"
-                        min="0"
-                        max="100"
-                        step="1"
+                        label="Smoothing"
+                        unit="%"
+                        min={0}
+                        max={100}
                         value={drawSmoothing}
-                        onChange={(event) => setDrawSmoothing(Number(event.target.value))}
-                        aria-describedby="brush-smoothing-help"
-                        aria-valuetext={drawSmoothing === 0 ? 'Off' : `${drawSmoothing}%`}
-                        className="block h-11 w-full accent-accent"
+                        onChange={setDrawSmoothing}
+                        descriptionId="brush-smoothing-help"
                       />
                       <p
                         id="brush-smoothing-help"
@@ -3501,7 +3485,7 @@ const App = () => {
                 onFillChange={updateCanvasFill}
               />
             ) : selectedText ? (
-              <div className="space-y-6">
+              <div key={selectedText.id} className="space-y-6">
                 {/* Content Section */}
                 <div className="space-y-3">
                   <h3 className="section-title">Content</h3>
@@ -3547,57 +3531,19 @@ const App = () => {
                         />
                       </div>
                     </div>
-                    <div className="hidden space-y-1.5 md:block">
-                      <label htmlFor="text-font-size" className="field-label">
-                        Size
-                      </label>
-                      <input
+                    <div className="col-span-2">
+                      <SliderControl
                         id="text-font-size"
-                        aria-label="Text size in pixels"
-                        type="number"
-                        step="1"
-                        value={Math.round(selectedText.fontSize)}
-                        onChange={(e) =>
-                          updateText(selectedText.id, { fontSize: Number(e.target.value) })
-                        }
-                        className="field-input"
-                      />
-                    </div>
-                    <div className="col-span-2 md:hidden">
-                      <MobileNumericControl
                         label="Font size"
-                        value={selectedText.fontSize}
+                        unit="px"
                         min={5}
-                        max={Math.max(300, Math.ceil(selectedText.fontSize * 2))}
-                        step={1}
+                        max={300}
+                        expandRange
                         buttonStep={2}
+                        value={selectedText.fontSize}
                         onChange={(fontSize) => updateText(selectedText.id, { fontSize })}
-                      />
-                    </div>
-                    <div className="hidden space-y-1.5 md:block">
-                      <label htmlFor="text-stroke-width" className="field-label">
-                        Stroke
-                      </label>
-                      <input
-                        id="text-stroke-width"
-                        aria-label="Text outline width in pixels"
-                        type="number"
-                        step="1"
-                        value={Math.round(selectedText.strokeWidth)}
-                        onChange={(e) =>
-                          updateText(selectedText.id, { strokeWidth: Number(e.target.value) })
-                        }
-                        className="field-input"
-                      />
-                    </div>
-                    <div className="col-span-2 md:hidden">
-                      <MobileNumericControl
-                        label="Stroke"
-                        value={selectedText.strokeWidth}
-                        min={0}
-                        max={Math.max(20, Math.ceil(selectedText.strokeWidth * 2))}
-                        step={1}
-                        onChange={(strokeWidth) => updateText(selectedText.id, { strokeWidth })}
+                        onAdjustmentStart={beginPropertyAdjustment}
+                        onAdjustmentEnd={endPropertyAdjustment}
                       />
                     </div>
                     <div className="space-y-1.5 col-span-2">
@@ -3632,11 +3578,11 @@ const App = () => {
 
                 {/* Appearance Section */}
                 <div className="space-y-3">
-                  <h3 className="section-title">Colors</h3>
+                  <h3 className="section-title">Appearance</h3>
                   <div className="space-y-3">
                     <div className="space-y-1.5">
                       <label htmlFor="text-fill-color" className="field-label">
-                        Fill
+                        Text color
                       </label>
                       <ColorPicker
                         id="text-fill-color"
@@ -3645,9 +3591,21 @@ const App = () => {
                         ariaLabel="Text fill color"
                       />
                     </div>
+                    <SliderControl
+                      id="text-stroke-width"
+                      label="Outline width"
+                      unit="px"
+                      min={0}
+                      max={20}
+                      expandRange
+                      value={selectedText.strokeWidth}
+                      onChange={(strokeWidth) => updateText(selectedText.id, { strokeWidth })}
+                      onAdjustmentStart={beginPropertyAdjustment}
+                      onAdjustmentEnd={endPropertyAdjustment}
+                    />
                     <div className="space-y-1.5">
                       <label htmlFor="text-outline-color" className="field-label">
-                        Outline
+                        Outline color
                       </label>
                       <ColorPicker
                         id="text-outline-color"
@@ -3660,9 +3618,15 @@ const App = () => {
                 </div>
 
                 {/* Shadow Section */}
-                <div className="space-y-3">
-                  <h3 className="section-title">Shadow</h3>
-                  <div className="space-y-4">
+                <details className="group border-t border-border pt-3">
+                  <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between section-title [&::-webkit-details-marker]:hidden">
+                    Shadow
+                    <ChevronDown
+                      size={16}
+                      className="text-content-muted transition-transform group-open:rotate-180"
+                    />
+                  </summary>
+                  <div className="mt-3 space-y-4">
                     <div className="space-y-3">
                       <div className="space-y-1.5">
                         <label htmlFor="text-shadow-color" className="field-label">
@@ -3675,93 +3639,62 @@ const App = () => {
                           ariaLabel="Text shadow color"
                         />
                       </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                          <div className="flex justify-between">
-                            <label htmlFor="text-shadow-blur" className="field-label">
-                              Blur
-                            </label>
-                            <output
-                              htmlFor="text-shadow-blur"
-                              className="text-xs tabular-nums text-content-muted"
-                            >
-                              {round2(selectedText.shadowBlur || 0)}
-                            </output>
-                          </div>
-                          <input
-                            id="text-shadow-blur"
-                            type="range"
-                            min="0"
-                            max="50"
-                            step="1"
-                            value={selectedText.shadowBlur || 0}
-                            onChange={(e) =>
-                              updateText(selectedText.id, { shadowBlur: Number(e.target.value) })
-                            }
-                            className="w-full accent-accent"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <div className="flex justify-between">
-                            <label htmlFor="text-shadow-opacity" className="field-label">
-                              Opacity
-                            </label>
-                            <output
-                              htmlFor="text-shadow-opacity"
-                              className="text-xs tabular-nums text-content-muted"
-                            >
-                              {round2(selectedText.shadowOpacity ?? 1)}
-                            </output>
-                          </div>
-                          <input
-                            id="text-shadow-opacity"
-                            type="range"
-                            min="0"
-                            max="1"
-                            step="0.05"
-                            value={selectedText.shadowOpacity ?? 1}
-                            onChange={(e) =>
-                              updateText(selectedText.id, { shadowOpacity: Number(e.target.value) })
-                            }
-                            className="w-full accent-accent"
-                          />
-                        </div>
-                      </div>
+                      <SliderControl
+                        id="text-shadow-blur"
+                        label="Blur"
+                        unit="px"
+                        min={0}
+                        max={50}
+                        expandRange
+                        value={selectedText.shadowBlur ?? 0}
+                        onChange={(shadowBlur) => updateText(selectedText.id, { shadowBlur })}
+                        onAdjustmentStart={beginPropertyAdjustment}
+                        onAdjustmentEnd={endPropertyAdjustment}
+                      />
+                      <SliderControl
+                        id="text-shadow-opacity"
+                        label="Opacity"
+                        unit="%"
+                        min={0}
+                        max={100}
+                        value={(selectedText.shadowOpacity ?? 1) * 100}
+                        onChange={(opacity) =>
+                          updateText(selectedText.id, { shadowOpacity: opacity / 100 })
+                        }
+                        onAdjustmentStart={beginPropertyAdjustment}
+                        onAdjustmentEnd={endPropertyAdjustment}
+                      />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1.5">
                         <label htmlFor="text-shadow-offset-x" className="field-label">
-                          Offset X
+                          Offset X (px)
                         </label>
-                        <input
+                        <NumericInput
                           id="text-shadow-offset-x"
-                          type="number"
-                          step="1"
-                          value={Math.round(selectedText.shadowOffsetX || 0)}
-                          onChange={(e) =>
-                            updateText(selectedText.id, { shadowOffsetX: Number(e.target.value) })
+                          value={selectedText.shadowOffsetX || 0}
+                          onCommit={(shadowOffsetX) =>
+                            updateText(selectedText.id, { shadowOffsetX })
                           }
                           className="field-input"
                         />
                       </div>
                       <div className="space-y-1.5">
                         <label htmlFor="text-shadow-offset-y" className="field-label">
-                          Offset Y
+                          Offset Y (px)
                         </label>
-                        <input
+                        <NumericInput
                           id="text-shadow-offset-y"
-                          type="number"
-                          step="1"
-                          value={Math.round(selectedText.shadowOffsetY || 0)}
-                          onChange={(e) =>
-                            updateText(selectedText.id, { shadowOffsetY: Number(e.target.value) })
+                          value={selectedText.shadowOffsetY || 0}
+                          onCommit={(shadowOffsetY) =>
+                            updateText(selectedText.id, { shadowOffsetY })
                           }
                           className="field-input"
                         />
                       </div>
                     </div>
                   </div>
-                </div>
+                </details>
 
                 {/* Layout Section */}
                 <div className="space-y-3">
@@ -3769,29 +3702,23 @@ const App = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label htmlFor="text-position-x" className="field-label">
-                        Position X
+                        Position X (px)
                       </label>
-                      <input
+                      <NumericInput
                         id="text-position-x"
-                        type="number"
-                        step="1"
-                        value={Math.round(selectedText.x)}
-                        onChange={(e) => updateText(selectedText.id, { x: Number(e.target.value) })}
+                        value={selectedText.x}
+                        onCommit={(x) => updateText(selectedText.id, { x })}
                         className="field-input"
                       />
                     </div>
                     <div className="space-y-1.5">
                       <label htmlFor="text-position-y" className="field-label">
-                        Position Y
+                        Position Y (px)
                       </label>
-                      <input
+                      <NumericInput
                         id="text-position-y"
-                        type="number"
-                        step="1"
-                        value={Math.round(-selectedText.y)}
-                        onChange={(e) =>
-                          updateText(selectedText.id, { y: -Number(e.target.value) })
-                        }
+                        value={selectedText.y}
+                        onCommit={(y) => updateText(selectedText.id, { y })}
                         className="field-input"
                       />
                     </div>
@@ -3799,28 +3726,17 @@ const App = () => {
                       <p className="field-label">Align to canvas</p>
                       <CanvasAlignmentControl onAlign={alignElementToCanvas} />
                     </div>
-                    <div className="space-y-1.5 col-span-2">
-                      <div className="flex justify-between">
-                        <label htmlFor="text-rotation" className="field-label">
-                          Rotation
-                        </label>
-                        <output
-                          htmlFor="text-rotation"
-                          className="text-xs tabular-nums text-content-muted"
-                        >
-                          {round2(selectedText.rotation || 0)}°
-                        </output>
-                      </div>
-                      <input
+                    <div className="col-span-2">
+                      <SliderControl
                         id="text-rotation"
-                        aria-valuetext={`${round2(selectedText.rotation || 0)} degrees`}
-                        type="range"
-                        min="-180"
-                        max="180"
-                        step="1"
-                        value={selectedText.rotation || 0}
-                        onChange={(e) => handleRotationChange(Number(e.target.value))}
-                        className="w-full accent-accent"
+                        label="Rotation"
+                        unit="°"
+                        min={-180}
+                        max={180}
+                        value={selectedText.rotation ?? 0}
+                        onChange={handleRotationChange}
+                        onAdjustmentStart={beginPropertyAdjustment}
+                        onAdjustmentEnd={endPropertyAdjustment}
                       />
                     </div>
                   </div>
@@ -3836,38 +3752,30 @@ const App = () => {
                 </div>
               </div>
             ) : selectedImage ? (
-              <div className="space-y-6">
+              <div key={selectedImage.id} className="space-y-6">
                 {/* Layout Section */}
                 <div className="space-y-3">
                   <h3 className="section-title">Layout</h3>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label htmlFor="image-position-x" className="field-label">
-                        Position X
+                        Position X (px)
                       </label>
-                      <input
+                      <NumericInput
                         id="image-position-x"
-                        type="number"
-                        step="1"
-                        value={Math.round(selectedImage.x)}
-                        onChange={(e) =>
-                          updateImage(selectedImage.id, { x: Number(e.target.value) })
-                        }
+                        value={selectedImage.x}
+                        onCommit={(x) => updateImage(selectedImage.id, { x })}
                         className="field-input"
                       />
                     </div>
                     <div className="space-y-1.5">
                       <label htmlFor="image-position-y" className="field-label">
-                        Position Y
+                        Position Y (px)
                       </label>
-                      <input
+                      <NumericInput
                         id="image-position-y"
-                        type="number"
-                        step="1"
-                        value={Math.round(selectedImage.y)}
-                        onChange={(e) =>
-                          updateImage(selectedImage.id, { y: Number(e.target.value) })
-                        }
+                        value={selectedImage.y}
+                        onCommit={(y) => updateImage(selectedImage.id, { y })}
                         className="field-input"
                       />
                     </div>
@@ -3875,28 +3783,17 @@ const App = () => {
                       <p className="field-label">Align to canvas</p>
                       <CanvasAlignmentControl onAlign={alignElementToCanvas} />
                     </div>
-                    <div className="space-y-1.5 col-span-2">
-                      <div className="flex justify-between">
-                        <label htmlFor="image-rotation" className="field-label">
-                          Rotation
-                        </label>
-                        <output
-                          htmlFor="image-rotation"
-                          className="text-xs tabular-nums text-content-muted"
-                        >
-                          {round2(selectedImage.rotation || 0)}°
-                        </output>
-                      </div>
-                      <input
+                    <div className="col-span-2">
+                      <SliderControl
                         id="image-rotation"
-                        aria-valuetext={`${round2(selectedImage.rotation || 0)} degrees`}
-                        type="range"
-                        min="-180"
-                        max="180"
-                        step="1"
-                        value={selectedImage.rotation || 0}
-                        onChange={(e) => handleRotationChange(Number(e.target.value))}
-                        className="w-full accent-accent"
+                        label="Rotation"
+                        unit="°"
+                        min={-180}
+                        max={180}
+                        value={selectedImage.rotation ?? 0}
+                        onChange={handleRotationChange}
+                        onAdjustmentStart={beginPropertyAdjustment}
+                        onAdjustmentEnd={endPropertyAdjustment}
                       />
                     </div>
                   </div>
@@ -4367,72 +4264,6 @@ const App = () => {
   );
 };
 
-interface MobileNumericControlProps {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  buttonStep?: number;
-  onChange: (value: number) => void;
-}
-
-const MobileNumericControl = memo(
-  ({ label, value, min, max, step, buttonStep = step, onChange }: MobileNumericControlProps) => {
-    const roundedValue = Math.round(value);
-    const displayValue = `${roundedValue} px`;
-    const decrease = () => onChange(Math.max(min, roundedValue - buttonStep));
-    const increase = () => onChange(Math.min(max, roundedValue + buttonStep));
-
-    return (
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="field-label">{label}</span>
-          <output
-            className="text-sm font-semibold tabular-nums text-content-strong"
-            aria-live="polite"
-          >
-            {displayValue}
-          </output>
-        </div>
-        <div className="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] gap-2">
-          <button
-            type="button"
-            onClick={decrease}
-            disabled={roundedValue <= min}
-            aria-label={`Decrease ${label.toLowerCase()}`}
-            className="flex min-h-11 items-center justify-center rounded-lg border border-border bg-canvas/50 text-content-secondary transition-colors hover:border-border-emphasis hover:text-content-strong disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Minus size={18} />
-          </button>
-          <div className="flex min-h-11 items-center justify-center rounded-lg border border-border bg-canvas/50 text-sm font-semibold tabular-nums text-content-strong">
-            {displayValue}
-          </div>
-          <button
-            type="button"
-            onClick={increase}
-            disabled={roundedValue >= max}
-            aria-label={`Increase ${label.toLowerCase()}`}
-            className="flex min-h-11 items-center justify-center rounded-lg border border-border bg-canvas/50 text-content-secondary transition-colors hover:border-accent hover:text-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Plus size={18} />
-          </button>
-        </div>
-        <input
-          type="range"
-          min={min}
-          max={max}
-          step={step}
-          value={roundedValue}
-          onChange={(event) => onChange(Number(event.target.value))}
-          aria-label={`Adjust ${label.toLowerCase()}`}
-          className="block h-11 w-full accent-accent"
-        />
-      </div>
-    );
-  },
-);
-
 interface CanvasZoomControlsProps {
   zoom: number;
   isFit: boolean;
@@ -4450,51 +4281,51 @@ interface MobileCanvasZoomSettingsProps {
 
 const MobileCanvasZoomSettings = memo(
   ({ zoom, isFit, onZoomChange, onFit }: MobileCanvasZoomSettingsProps) => (
-    <div className="mb-6 space-y-3 rounded-lg border border-border p-4 md:hidden">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="section-title">Canvas zoom</h3>
-          <p className="mt-1 text-xs leading-relaxed text-content-subtle">
-            Pinch or move two fingers. Double-tap to toggle zoom.
-          </p>
+    <details className="group mb-6 rounded-lg border border-border px-3 md:hidden">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 section-title [&::-webkit-details-marker]:hidden">
+        Canvas zoom
+        <span className="flex items-center gap-2 text-content-muted">
+          <output htmlFor="mobile-canvas-zoom" className="text-xs font-medium tabular-nums">
+            {Math.round(zoom * 100)}%
+          </output>
+          <ChevronDown size={16} className="transition-transform group-open:rotate-180" />
+        </span>
+      </summary>
+      <div className="space-y-3 pb-3">
+        <p className="text-xs leading-relaxed text-content-subtle">
+          Pinch or move two fingers. Double-tap to toggle zoom.
+        </p>
+        <input
+          id="mobile-canvas-zoom"
+          type="range"
+          min={MIN_CANVAS_ZOOM * 100}
+          max={MAX_CANVAS_ZOOM * 100}
+          step="1"
+          value={Math.round(zoom * 100)}
+          onChange={(event) => onZoomChange(Number(event.target.value) / 100)}
+          className="block h-11 w-full accent-accent"
+          aria-label="Canvas zoom percentage"
+        />
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={onFit}
+            aria-pressed={isFit}
+            className={`min-h-11 rounded-lg border px-3 text-xs font-semibold transition-colors ${isFit ? 'border-accent bg-accent/15 text-accent-hover' : 'border-border bg-background text-content-secondary'}`}
+          >
+            Fit
+          </button>
+          <button
+            type="button"
+            onClick={() => onZoomChange(1)}
+            aria-pressed={Math.abs(zoom - 1) < 0.005}
+            className={`min-h-11 rounded-lg border px-3 text-xs font-semibold transition-colors ${Math.abs(zoom - 1) < 0.005 ? 'border-accent bg-accent/15 text-accent-hover' : 'border-border bg-background text-content-secondary'}`}
+          >
+            100%
+          </button>
         </div>
-        <output
-          htmlFor="mobile-canvas-zoom"
-          className="rounded-md bg-surface px-2 py-1 text-xs font-medium tabular-nums text-content-strong"
-        >
-          {Math.round(zoom * 100)}%
-        </output>
       </div>
-      <input
-        id="mobile-canvas-zoom"
-        type="range"
-        min={MIN_CANVAS_ZOOM * 100}
-        max={MAX_CANVAS_ZOOM * 100}
-        step="1"
-        value={Math.round(zoom * 100)}
-        onChange={(event) => onZoomChange(Number(event.target.value) / 100)}
-        className="w-full accent-accent"
-        aria-label="Canvas zoom percentage"
-      />
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          onClick={onFit}
-          aria-pressed={isFit}
-          className={`min-h-11 rounded-lg border px-3 text-xs font-semibold transition-colors ${isFit ? 'border-accent bg-accent/15 text-accent-hover' : 'border-border bg-background text-content-secondary'}`}
-        >
-          Fit
-        </button>
-        <button
-          type="button"
-          onClick={() => onZoomChange(1)}
-          aria-pressed={Math.abs(zoom - 1) < 0.005}
-          className={`min-h-11 rounded-lg border px-3 text-xs font-semibold transition-colors ${Math.abs(zoom - 1) < 0.005 ? 'border-accent bg-accent/15 text-accent-hover' : 'border-border bg-background text-content-secondary'}`}
-        >
-          100%
-        </button>
-      </div>
-    </div>
+    </details>
   ),
 );
 
@@ -4971,17 +4802,11 @@ const CanvasExpansionPreview = memo(
           <div className="mt-4 grid grid-cols-[1fr_auto] items-end gap-3">
             <label className="field-label space-y-1.5">
               Size
-              <input
-                type="number"
-                min="1"
+              <NumericInput
+                min={1}
                 max={maxAddition}
                 value={draft.size}
-                onChange={(event) =>
-                  onChange({
-                    ...draft,
-                    size: Math.max(1, Math.min(maxAddition, Number(event.target.value))),
-                  })
-                }
+                onCommit={(size) => onChange({ ...draft, size })}
                 className="block min-h-11 w-full rounded-lg border border-border bg-canvas px-3 text-sm font-normal text-content-strong outline-none focus:border-accent-hover"
               />
             </label>
@@ -5031,45 +4856,6 @@ const CanvasExpansionPreview = memo(
   },
 );
 
-interface CanvasDimensionInputProps {
-  label: string;
-  value: number;
-  onCommit: (value: number) => void;
-}
-
-const CanvasDimensionInput = ({ label, value, onCommit }: CanvasDimensionInputProps) => {
-  const [inputValue, setInputValue] = useState(String(Math.round(value)));
-
-  const commit = () => {
-    const parsed = Number(inputValue);
-    if (!inputValue.trim() || !Number.isFinite(parsed)) {
-      setInputValue(String(Math.round(value)));
-      return;
-    }
-    const next = Math.min(MAX_CANVAS_SIZE, Math.max(MIN_CANVAS_SIZE, Math.round(parsed)));
-    setInputValue(String(next));
-    onCommit(next);
-  };
-
-  return (
-    <label className="space-y-1.5 field-label">
-      {label}
-      <input
-        type="number"
-        min={MIN_CANVAS_SIZE}
-        max={MAX_CANVAS_SIZE}
-        value={inputValue}
-        onChange={(event) => setInputValue(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') event.currentTarget.blur();
-        }}
-        className="field-input block text-content-strong"
-      />
-    </label>
-  );
-};
-
 interface CanvasPropertiesProps {
   canvas: CanvasState;
   anchor: CanvasAnchor;
@@ -5084,18 +4870,26 @@ const CanvasProperties = memo(
       <section className="space-y-4">
         <h3 className="section-title">Size</h3>
         <div className="grid grid-cols-2 gap-4">
-          <CanvasDimensionInput
-            key={`width-${canvas.width}`}
-            label="Width (px)"
-            value={canvas.width}
-            onCommit={(width) => onResize(width, canvas.height, anchor)}
-          />
-          <CanvasDimensionInput
-            key={`height-${canvas.height}`}
-            label="Height (px)"
-            value={canvas.height}
-            onCommit={(height) => onResize(canvas.width, height, anchor)}
-          />
+          <label className="space-y-1.5 field-label">
+            Width (px)
+            <NumericInput
+              min={MIN_CANVAS_SIZE}
+              max={MAX_CANVAS_SIZE}
+              className="field-input block text-content-strong"
+              value={canvas.width}
+              onCommit={(width) => onResize(width, canvas.height, anchor)}
+            />
+          </label>
+          <label className="space-y-1.5 field-label">
+            Height (px)
+            <NumericInput
+              min={MIN_CANVAS_SIZE}
+              max={MAX_CANVAS_SIZE}
+              className="field-input block text-content-strong"
+              value={canvas.height}
+              onCommit={(height) => onResize(canvas.width, height, anchor)}
+            />
+          </label>
         </div>
         <details className="group rounded-lg border border-border px-3">
           <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 text-xs font-semibold text-content-muted [&::-webkit-details-marker]:hidden">
